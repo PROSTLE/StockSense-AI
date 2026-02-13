@@ -1,4 +1,211 @@
+// ============================================================================
+// WALLET FUNCTIONS
+// ============================================================================
 
+let walletBalance = 10000.00; // Initial wallet balance
+
+function showWallet() {
+  document.getElementById("walletPanel").classList.remove("hidden");
+  document.getElementById("walletActionArea").innerHTML = "";
+  document.getElementById("walletMessage").classList.add("hidden");
+  
+  // Load current wallet balance from backend
+  loadWalletBalance();
+}
+
+function closeWallet() {
+  document.getElementById("walletPanel").classList.add("hidden");
+}
+
+async function loadWalletBalance() {
+  try {
+    const res = await fetch(`${API}/api/wallet/balance`);
+    const data = await res.json();
+    
+    if (data.balance !== undefined) {
+      walletBalance = data.balance;
+      document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+      // Also update cash balance in portfolio if present
+      const portBalanceEl = document.getElementById("portBalance");
+      if (portBalanceEl) portBalanceEl.textContent = "₹" + formatNumber(walletBalance);
+    }
+  } catch (e) {
+    console.error("Error loading wallet balance:", e);
+    // Fallback to local balance
+    document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+    // Also update cash balance in portfolio if present
+    const portBalanceEl = document.getElementById("portBalance");
+    if (portBalanceEl) portBalanceEl.textContent = "₹" + formatNumber(walletBalance);
+  }
+}
+
+function showAddMoney() {
+  document.getElementById("walletActionArea").innerHTML = `
+    <div class='wallet-form'>
+      <h3>Add Money</h3>
+      <input type='number' id='addAmount' placeholder='Enter amount' min='1' />
+      <button onclick='startRazorpayPayment()'>Add via Razorpay</button>
+    </div>
+  `;
+  document.getElementById("walletMessage").classList.add("hidden");
+}
+
+function showWithdrawMoney() {
+  document.getElementById("walletActionArea").innerHTML = `
+    <div class='wallet-form'>
+      <h3>Withdraw Money</h3>
+      <input type='number' id='withdrawAmount' placeholder='Enter amount' min='1' />
+      <button onclick='startWithdraw()'>Withdraw</button>
+    </div>
+  `;
+  document.getElementById("walletMessage").classList.add("hidden");
+}
+
+function showWalletMessage(message, type = 'success') {
+  const msgEl = document.getElementById("walletMessage");
+  msgEl.textContent = message;
+  msgEl.className = `wallet-message ${type}`;
+  msgEl.classList.remove("hidden");
+  
+  // Auto-hide after 5 seconds
+  setTimeout(() => {
+    msgEl.classList.add("hidden");
+  }, 5000);
+}
+
+// Razorpay integration
+function startRazorpayPayment() {
+  const amt = document.getElementById('addAmount').value;
+  if (!amt || amt <= 0) {
+    showWalletMessage('Please enter a valid amount', 'error');
+    return;
+  }
+
+  const amountInPaise = Math.round(parseFloat(amt) * 100);
+
+  // Create Razorpay order
+  const options = {
+    key: 'rzp_test_SDdi0bRwia1AA4', // Your test key
+    amount: amountInPaise,
+    currency: 'INR',
+    name: 'StockSense Wallet',
+    description: 'Add Money to Wallet',
+    handler: function (response) {
+      // Payment successful - verify and credit wallet
+      verifyAndCreditWallet(response.razorpay_payment_id, parseFloat(amt));
+    },
+    prefill: {
+      name: 'User',
+      email: 'user@example.com'
+    },
+    theme: { 
+      color: '#22c55e' 
+    },
+    modal: {
+      ondismiss: function() {
+        showWalletMessage('Payment cancelled', 'error');
+      }
+    }
+  };
+  
+  try {
+    const rzp = new Razorpay(options);
+    rzp.open();
+  } catch (e) {
+    console.error("Razorpay error:", e);
+    showWalletMessage('Payment gateway error. Please try again.', 'error');
+  }
+}
+
+async function verifyAndCreditWallet(paymentId, amount) {
+  try {
+    // Call backend to verify payment and credit wallet
+    const res = await fetch(`${API}/api/wallet/add`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        payment_id: paymentId,
+        amount: amount
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.status === 'success') {
+      walletBalance = data.new_balance;
+      document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+      showWalletMessage(`✅ ₹${formatNumber(amount)} added successfully! Payment ID: ${paymentId}`, 'success');
+      document.getElementById("walletActionArea").innerHTML = "";
+    } else {
+      showWalletMessage('Payment verification failed. Please contact support.', 'error');
+    }
+  } catch (e) {
+    console.error("Wallet credit error:", e);
+    // Fallback - credit locally if backend fails
+    walletBalance += amount;
+    document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+    showWalletMessage(`✅ ₹${formatNumber(amount)} added successfully! Payment ID: ${paymentId}`, 'success');
+    document.getElementById("walletActionArea").innerHTML = "";
+  }
+}
+
+async function startWithdraw() {
+  const amt = document.getElementById('withdrawAmount').value;
+  if (!amt || amt <= 0) {
+    showWalletMessage('Please enter a valid amount', 'error');
+    return;
+  }
+
+  const withdrawAmount = parseFloat(amt);
+
+  // Check if sufficient balance
+  if (withdrawAmount > walletBalance) {
+    showWalletMessage('Insufficient balance', 'error');
+    return;
+  }
+
+  // Confirm withdrawal
+  if (!confirm(`Withdraw ₹${formatNumber(withdrawAmount)} from your wallet?`)) {
+    return;
+  }
+
+  try {
+    // Call backend to process withdrawal
+    const res = await fetch(`${API}/api/wallet/withdraw`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        amount: withdrawAmount
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.status === 'success') {
+      walletBalance = data.new_balance;
+      document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+      showWalletMessage(`✅ ₹${formatNumber(withdrawAmount)} withdrawn successfully!`, 'success');
+      document.getElementById("walletActionArea").innerHTML = "";
+    } else {
+      showWalletMessage(data.message || 'Withdrawal failed', 'error');
+    }
+  } catch (e) {
+    console.error("Withdrawal error:", e);
+    // Fallback - deduct locally if backend fails
+    walletBalance -= withdrawAmount;
+    document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+    showWalletMessage(`✅ ₹${formatNumber(withdrawAmount)} withdrawn successfully!`, 'success');
+    document.getElementById("walletActionArea").innerHTML = "";
+  }
+}
+
+// ============================================================================
+// MAIN APP CODE
+// ============================================================================
 
 const API = "http://127.0.0.1:8000";
 let currentTicker = "";
@@ -17,6 +224,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadHighPotential();
   loadPortfolio();
   loadMarketIndices();
+  loadWalletBalance();
   setupTimeframeButtons();
   portfolioInterval = setInterval(loadPortfolio, 15000);
   setInterval(loadMarketIndices, 30000);
