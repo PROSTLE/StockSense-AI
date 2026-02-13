@@ -1,7 +1,3 @@
-"""
-Fetches historical stock data from Yahoo Finance and computes
-technical indicators: SMA, EMA, RSI, MACD, and Volume profile.
-"""
 
 import yfinance as yf
 import pandas as pd
@@ -10,7 +6,6 @@ from datetime import datetime
 
 
 def fetch_stock_data(ticker: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
-    """Download OHLCV data from Yahoo Finance."""
     stock = yf.Ticker(ticker)
     df = stock.history(period=period, interval=interval)
     if df.empty:
@@ -20,8 +15,9 @@ def fetch_stock_data(ticker: str, period: str = "2y", interval: str = "1d") -> p
 
 
 def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
-    """Add SMA, EMA, RSI, MACD, and volume-based indicators."""
     close = df["Close"]
+    high = df["High"]
+    low = df["Low"]
     volume = df["Volume"]
 
     df["SMA_20"] = ta.trend.sma_indicator(close, window=20)
@@ -34,19 +30,25 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     df["MACD_Signal"] = macd.macd_signal()
     df["MACD_Hist"] = macd.macd_diff()
 
+    bb = ta.volatility.BollingerBands(close, window=20, window_dev=2)
+    df["BB_Upper"] = bb.bollinger_hband()
+    df["BB_Lower"] = bb.bollinger_lband()
+    df["BB_Width"] = bb.bollinger_wband()
+
+    df["ATR"] = ta.volatility.average_true_range(high, low, close, window=14)
+
     df["Volume_SMA_20"] = ta.trend.sma_indicator(volume, window=20)
     df.dropna(inplace=True)
     return df
 
 
 def get_stock_info(ticker: str) -> dict:
-    """Return basic stock metadata."""
     stock = yf.Ticker(ticker)
     info = stock.info
     return {
         "name": info.get("shortName", ticker),
         "sector": info.get("sector", "N/A"),
-        "currency": info.get("currency", "USD"),
+        "currency": info.get("currency", "INR"),
         "current_price": info.get("currentPrice", info.get("regularMarketPrice", 0)),
         "market_cap": info.get("marketCap", 0),
         "day_high": info.get("dayHigh", 0),
@@ -60,7 +62,6 @@ def get_stock_info(ticker: str) -> dict:
 
 
 def fetch_live_price(ticker: str) -> dict:
-    """Fetch the latest price snapshot for live ticker display."""
     stock = yf.Ticker(ticker)
     info = stock.info
 
@@ -96,7 +97,6 @@ TIMEFRAME_MAP = {
 
 
 def fetch_chart_data(ticker: str, timeframe: str) -> list[dict]:
-    """Return OHLCV records for a given timeframe."""
     period, interval = TIMEFRAME_MAP.get(timeframe, ("1mo", "1h"))
     stock = yf.Ticker(ticker)
     df = stock.history(period=period, interval=interval)
