@@ -13,23 +13,151 @@
 
 <body>
 
-  <!-- Wallet Modal (imported from wallet.html) -->
+  <!-- Wallet Panel — Premium Slide-in -->
   <div id="walletPanel" class="wallet-panel hidden">
     <div class="wallet-panel-content">
       <span class="wallet-close" onclick="closeWallet()">&times;</span>
-      <h2>Wallet</h2>
-      <div class="wallet-balance">
-        <span>Balance:</span>
-        <span id="walletBalance">₹10,000.00</span>
+
+      <!-- Header -->
+      <div class="wallet-header">
+        <div class="wallet-header-icon">💰</div>
+        <h2>My Wallet</h2>
+        <p class="wallet-subtitle">Synced with AutoBot Balance</p>
       </div>
+
+      <!-- Balance Card -->
+      <div class="wallet-balance-card">
+        <div class="wallet-balance-label">Available Balance</div>
+        <div class="wallet-balance-amount" id="walletBalance">₹10,00,000.00</div>
+        <div class="wallet-balance-bar"></div>
+      </div>
+
+      <!-- Quick Add Buttons -->
+      <div class="wallet-quick-add">
+        <span class="wallet-quick-label">Quick Add</span>
+        <div class="wallet-quick-btns">
+          <button onclick="quickAdd(500)">₹500</button>
+          <button onclick="quickAdd(1000)">₹1,000</button>
+          <button onclick="quickAdd(5000)">₹5,000</button>
+          <button onclick="quickAdd(10000)">₹10,000</button>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
       <div class="wallet-actions">
-        <button onclick="showAddMoney()">Add Money</button>
-        <button onclick="showWithdrawMoney()">Withdraw</button>
+        <button class="wallet-action-btn add" onclick="showAddMoney()">
+          <span class="action-icon">＋</span> Add Money
+        </button>
+        <button class="wallet-action-btn withdraw" onclick="showWithdrawMoney()">
+          <span class="action-icon">↗</span> Withdraw
+        </button>
       </div>
+
+      <!-- Dynamic Form Area -->
       <div id="walletActionArea"></div>
+
+      <!-- Status Message -->
       <div id="walletMessage" class="wallet-message hidden"></div>
+
+      <!-- Transaction History -->
+      <div class="wallet-txn-section">
+        <h4>Recent Transactions</h4>
+        <div id="walletTxnList" class="wallet-txn-list">
+          <div class="wallet-txn-empty">No transactions yet</div>
+        </div>
+      </div>
     </div>
   </div>
+
+
+  <!-- ═══════ Trade Panel — Premium Full Slide-in ═══════ -->
+  <div id="tradePanel" class="trade-panel-overlay hidden">
+    <div class="trade-panel-content">
+      <span class="trade-panel-close" onclick="closeTradePanel()">&times;</span>
+
+      <!-- Tab Bar -->
+      <div class="trade-panel-tabs">
+        <button class="tp-tab active" onclick="switchTradeTab('search')" data-tab="search">🔍 Trade</button>
+        <button class="tp-tab" onclick="switchTradeTab('holdings')" data-tab="holdings">📂 Holdings</button>
+        <button class="tp-tab" onclick="switchTradeTab('history')" data-tab="history">📋 History</button>
+        <button class="tp-tab" onclick="switchTradeTab('watchlist')" data-tab="watchlist">⭐ Watchlist</button>
+      </div>
+
+      <!-- Search & Trade Tab -->
+      <div class="tp-tab-content" id="tpSearchTab">
+        <div class="tp-search-wrap">
+          <input type="text" id="tradeSearchInput" placeholder="Search stock… (e.g. Reliance, TCS, INFY)"
+            spellcheck="false" autocomplete="off" />
+          <div class="tp-search-dropdown hidden" id="tradeSearchDropdown"></div>
+        </div>
+
+        <!-- Selected Stock Info -->
+        <div class="tp-stock-card hidden" id="tpStockCard">
+          <div class="tp-stock-header">
+            <div>
+              <h3 id="tpStockName">—</h3>
+              <span class="tp-stock-ticker" id="tpStockTicker">—</span>
+            </div>
+            <div class="tp-stock-price-area">
+              <span class="tp-stock-price" id="tpStockPrice">₹0.00</span>
+              <span class="tp-stock-change" id="tpStockChange">0.00%</span>
+            </div>
+          </div>
+
+          <div class="tp-market-badge" id="tpMarketBadge">
+            <span class="dot"></span> <span id="tpMarketStatus">LIVE</span>
+          </div>
+
+          <!-- Buy / Sell Form -->
+          <div class="tp-action-area">
+            <div class="tp-action-tabs">
+              <button class="tp-action-btn active" id="tpBuyBtn" onclick="setTradeAction('buy')">BUY</button>
+              <button class="tp-action-btn sell" id="tpSellBtn" onclick="setTradeAction('sell')">SELL</button>
+            </div>
+            <div class="tp-form">
+              <label>Quantity</label>
+              <input type="number" id="tpQuantity" placeholder="Enter shares" min="1" value="1" />
+              <div class="tp-order-summary">
+                <div class="tp-summary-row"><span>Price</span><span id="tpSummaryPrice">₹0.00</span></div>
+                <div class="tp-summary-row"><span>Quantity</span><span id="tpSummaryQty">1</span></div>
+                <div class="tp-summary-row total"><span>Order Value</span><span id="tpSummaryTotal">₹0.00</span></div>
+                <div class="tp-summary-row"><span>Wallet Balance</span><span id="tpSummaryBalance">₹0.00</span></div>
+              </div>
+              <button class="tp-execute-btn" id="tpExecuteBtn" onclick="executeTradeFromPanel()">⚡ Place BUY
+                Order</button>
+            </div>
+          </div>
+
+          <!-- Add to Watchlist -->
+          <button class="tp-watchlist-btn" id="tpWatchlistBtn" onclick="toggleWatchlistFromPanel()">⭐ Add to
+            Watchlist</button>
+        </div>
+      </div>
+
+      <!-- Holdings Tab -->
+      <div class="tp-tab-content hidden" id="tpHoldingsTab">
+        <div id="tpHoldingsList" class="tp-holdings-list">
+          <div class="tp-empty">No holdings yet</div>
+        </div>
+      </div>
+
+      <!-- History Tab -->
+      <div class="tp-tab-content hidden" id="tpHistoryTab">
+        <div id="tpHistoryList" class="tp-history-list">
+          <div class="tp-empty">No trade history</div>
+        </div>
+      </div>
+
+      <!-- Watchlist Tab -->
+      <div class="tp-tab-content hidden" id="tpWatchlistTab">
+        <div id="tpWatchlistList" class="tp-watchlist-list">
+          <div class="tp-empty">Your watchlist is empty. Add stocks from the Trade tab.</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
 
   <nav class="topbar">
     <div class="brand">📈 <span>StockSense AI</span></div>
@@ -45,7 +173,7 @@
       <button class="nav-tab active" onclick="switchTab('charts')">📊 Charts</button>
       <button class="nav-tab" onclick="switchTab('trading')">🤖 Auto Trade</button>
       <button class="btn-wallet nav-btn" onclick="showWallet()">💰 Wallet</button>
-      <button class="btn-trade nav-btn" onclick="executeManualTrade()">🛒 Trade</button>
+      <button class="btn-trade nav-btn" onclick="openTradePanel()">🛒 Trade</button>
     </div>
     <div class="live-badge" id="liveBadge">
       <span class="dot"></span> LIVE
@@ -105,6 +233,8 @@
         </div>
         <div class="chart-container" id="mainChartWrap">
           <canvas id="mainChart"></canvas>
+          <button class="chart-trade-btn" id="mainChartTradeBtn" onclick="openTradePanel(currentTicker)"
+            title="Trade this stock">🛒 Trade</button>
           <div class="chart-empty-state" id="chartEmptyState">
             <div class="empty-icon">📈</div>
             <h3>Explore Any Stock</h3>
@@ -134,7 +264,11 @@
               </div>
             </div>
           </div>
-          <div class="chart-container" id="predChartWrap"><canvas id="predChart"></canvas></div>
+          <div class="chart-container" id="predChartWrap">
+            <canvas id="predChart"></canvas>
+            <button class="chart-trade-btn" onclick="openTradePanel(currentTicker)" title="Trade this stock">🛒
+              Trade</button>
+          </div>
           <div class="pred-metrics">
             <div class="metric-card">
               <span class="m-label">Confidence</span>
@@ -187,6 +321,20 @@
 
 
       <div class="trade-grid">
+
+        <!-- Account Value Chart -->
+        <div class="account-value-section">
+          <div class="av-header">
+            <h3>📈 Account Value</h3>
+            <div class="av-market-badge" id="avMarketBadge">
+              <span class="dot" id="avMarketDot"></span>
+              <span id="avMarketLabel">OFFLINE</span>
+            </div>
+          </div>
+          <div class="av-chart-container">
+            <canvas id="accountValueChart"></canvas>
+          </div>
+        </div>
         <div class="portfolio-header">
           <div class="port-card balance">
             <span class="pc-label">Portfolio Value</span>
