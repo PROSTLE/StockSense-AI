@@ -1,5 +1,6 @@
 
 from fastapi import FastAPI, HTTPException, Query
+from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from stock_data import fetch_stock_data, add_technical_indicators, get_stock_info, fetch_live_price, fetch_chart_data
 from sentiment import analyze_sentiment
@@ -9,6 +10,8 @@ from trader import (
     get_portfolio, reset_portfolio, toggle_bot,
     evaluate_trade_signal, execute_sell, execute_buy, check_position,
     compute_dynamic_levels, detect_market_regime,
+    add_to_balance, withdraw_from_balance, get_wallet_transactions,
+    get_value_history, record_portfolio_snapshot,
 )
 import concurrent.futures
 
@@ -496,5 +499,59 @@ def trade_auto_scan():
             "results": results,
             "portfolio": get_portfolio(),
         }
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ── Wallet API ────────────────────────────────────────────────────────────────
+
+class AddMoneyRequest(BaseModel):
+    payment_id: str
+    amount: float
+
+class WithdrawRequest(BaseModel):
+    amount: float
+
+
+@app.get("/api/wallet/balance")
+def wallet_balance():
+    """Return wallet balance (= portfolio cash balance)."""
+    portfolio = get_portfolio()
+    return {"balance": portfolio["balance"], "status": "success"}
+
+
+@app.post("/api/wallet/add")
+def wallet_add(req: AddMoneyRequest):
+    """Credit wallet after Razorpay payment."""
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+    result = add_to_balance(req.amount, req.payment_id)
+    return result
+
+
+@app.post("/api/wallet/withdraw")
+def wallet_withdraw(req: WithdrawRequest):
+    """Withdraw from wallet (portfolio cash)."""
+    if req.amount <= 0:
+        raise HTTPException(status_code=400, detail="Invalid amount")
+    result = withdraw_from_balance(req.amount)
+    if result["status"] == "error":
+        raise HTTPException(status_code=400, detail=result["message"])
+    return result
+
+
+@app.get("/api/wallet/transactions")
+def wallet_transactions():
+    """Return wallet transaction history."""
+    txns = get_wallet_transactions()
+    return {"transactions": txns, "status": "success"}
+
+
+@app.get("/api/portfolio/value-history")
+def portfolio_value_history():
+    """Return portfolio value snapshots for the account value chart."""
+    try:
+        snapshots = get_value_history()
+        return {"snapshots": snapshots, "status": "success"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
