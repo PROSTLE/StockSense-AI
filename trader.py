@@ -474,6 +474,10 @@ def compute_technical_score(indicators: dict) -> float:
     return max(0, min(100, score))
 
 
+# Plausible 5-day move cap: avoid impossible V-spikes / apocalyptic plunges from raw LSTM
+PRED_CHANGE_PCT_CAP = 4.0  # ±4% over 5 days used for scoring; raw pred still reported
+
+
 def compute_composite_score(
     predicted_prices: list,
     current_price: float,
@@ -481,13 +485,17 @@ def compute_composite_score(
     indicators: dict | None = None,
     sentiment_score: float | None = None,
     xgb_score: float | None = None,
+    regime: str | None = None,
 ) -> dict:
     pred_day5 = predicted_prices[-1]
     pred_change_pct = ((pred_day5 - current_price) / current_price) * 100
     days_above = sum(1 for p in predicted_prices if p > current_price)
 
+    # Cap extreme LSTM moves for scoring so one-off model spikes don't dominate
+    effective_pred_pct = max(-PRED_CHANGE_PCT_CAP, min(PRED_CHANGE_PCT_CAP, pred_change_pct))
+
     lstm_score = 50.0
-    lstm_score += pred_change_pct * 5
+    lstm_score += effective_pred_pct * 5
     lstm_score += (days_above - 2.5) * 6
     lstm_score += (confidence - 50) * 0.3
     lstm_score = max(0, min(100, lstm_score))
@@ -502,8 +510,14 @@ def compute_composite_score(
     else:
         sent_score = 50.0
 
-    # Blend: 45% LSTM, 45% XGBoost, 10% news
-    LSTM_W, XGB_W, SENT_W = 0.45, 0.45, 0.10
+    # High-vol regimes: downweight news so isolated headlines (e.g. one positive in a sell-off)
+    # don't override macro; keep 45% LSTM, 45% XGBoost, 10% news in calm regimes only
+    high_vol = regime in ("BEAR_HIGH_VOL", "BULL_HIGH_VOL")
+    if high_vol:
+        LSTM_W, XGB_W, SENT_W = 0.485, 0.485, 0.03   # 3% news in high vol
+    else:
+        LSTM_W, XGB_W, SENT_W = 0.45, 0.45, 0.10
+
     composite = (lstm_score * LSTM_W) + (xgb_score * XGB_W) + (sent_score * SENT_W)
     composite = round(max(0, min(100, composite)), 1)
 
@@ -513,7 +527,9 @@ def compute_composite_score(
         "xgb_score": round(xgb_score, 1),
         "sent_score": round(sent_score, 1),
         "pred_change_pct": round(pred_change_pct, 2),
+        "pred_change_pct_capped": round(effective_pred_pct, 2),
         "days_above": days_above,
+        "sentiment_weight_used": SENT_W,
     }
 
 
@@ -616,6 +632,7 @@ def evaluate_trade_signal(
     scores = compute_composite_score(
         predicted_prices, current_price, confidence,
         indicators, sentiment_score,
+        regime=regime["regime"],
     )
     composite = scores["composite_score"]
 
