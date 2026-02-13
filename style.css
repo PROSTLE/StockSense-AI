@@ -573,6 +573,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
   padding: 0.6rem 1.5rem;
   background: var(--bg2);
   border-bottom: 1px solid var(--border);
@@ -594,10 +596,15 @@ body {
 .search-area {
   display: flex;
   gap: 0.4rem;
+  flex: 1;
+  min-width: 0;
+  max-width: 420px;
 }
 
 .search-area input {
-  width: 260px;
+  width: 100%;
+  min-width: 120px;
+  max-width: 260px;
   padding: 0.5rem 0.8rem;
   background: var(--bg3);
   border: 1px solid var(--border);
@@ -779,6 +786,8 @@ body {
 .nav-tabs {
   display: flex;
   gap: 0.3rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .nav-tab {
@@ -809,17 +818,38 @@ body {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: var(--green);
   font-weight: 700;
   font-size: 0.8rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  transition: background 0.2s, color 0.2s;
+}
+
+.live-badge.live {
+  color: var(--green);
+  background: rgba(34, 197, 94, 0.12);
+}
+
+.live-badge.live .dot {
+  background: var(--green);
+  animation: pulse 1.5s infinite;
+}
+
+.live-badge.closed {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.live-badge.closed .dot {
+  background: var(--red);
+  animation: none;
 }
 
 .live-badge .dot {
   width: 8px;
   height: 8px;
-  background: var(--green);
   border-radius: 50%;
-  animation: pulse 1.5s infinite;
+  flex-shrink: 0;
 }
 
 @keyframes pulse {
@@ -849,6 +879,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 2rem;
+  flex-wrap: wrap;
 }
 
 .market-item {
@@ -1618,6 +1649,276 @@ footer p+p {
 
   .bot-buttons {
     flex-wrap: wrap;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   RESPONSIVE: Tablet & mobile — layout adapts to screen size
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1024px) {
+  .topbar {
+    padding: 0.5rem 1rem;
+  }
+
+  .search-area {
+    max-width: 280px;
+  }
+
+  .chart-container {
+    height: 380px;
+  }
+
+  .volume-chart {
+    height: 160px;
+  }
+}
+
+@media (max-width: 768px) {
+  body {
+    font-size: 13px;
+  }
+
+  .topbar {
+    padding: 0.5rem 0.75rem;
+    gap: 0.4rem;
+  }
+
+  .brand {
+    font-size: 1rem;
+    order: 0;
+  }
+
+  .brand span {
+    display: inline;
+  }
+
+  .live-badge {
+    order: 1;
+    margin-left: auto;
+    font-size: 0.7rem;
+    padding: 0.2rem 0.4rem;
+  }
+
+  .nav-tabs {
+    order: 2;
+  }
+
+  .search-area {
+    order: 3;
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .search-area input {
+    max-width: none;
+  }
+
+  .nav-tab {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  .btn-wallet,
+  .btn-trade {
+    padding: 0.4rem 0.7rem;
+    font-size: 0.8rem;
+  }
+
+  .market-bar {
+    padding: 0.35rem 0.75rem;
+    top: auto;
+  }
+
+  .market-bar-inner {
+    gap: 1rem;
+  }
+
+  .market-item {
+    flex-wrap: wrap;
+  }
+
+  .mkt-label {
+    font-size: 0.65rem;
+  }
+
+  .mkt-price {
+    font-size: 0.8rem;
+  }
+
+  .chart-area {
+    padding: 0.75rem 1rem;
+  }
+
+  .chart-container {
+    height: 320px;
+    padding: 0.5rem;
+  }
+
+  .volume-chart {
+    height: 140px;
+  }
+
+  .price-banner {
+    padding: 0.75rem 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .price-main h1 {
+    font-size: 1.1rem;
+  }
+
+  .price-value {
+    font-size: 1.5rem;
+  }
+
+  .pred-metrics {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .metric-card {
+    padding: 0.6rem;
+  }
+
+  .m-value {
+    font-size: 1.1rem;
+  }
+
+  .trading-dashboard {
+    padding: 0.75rem 1rem;
+  }
+
+  .portfolio-header {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .port-card {
+    padding: 0.75rem;
+  }
+
+  .pc-value {
+    font-size: 1.1rem;
+  }
+
+  .positions-table {
+    font-size: 0.78rem;
+  }
+
+  .positions-table th,
+  .positions-table td {
+    padding: 0.4rem 0.35rem;
+  }
+
+  .insights-grid {
+    grid-template-columns: 1fr;
+    padding: 0 1rem;
+  }
+
+  .insights-section {
+    padding: 1.5rem 1rem;
+  }
+
+  .pipeline-section {
+    padding: 1.5rem 1rem;
+  }
+
+  .app-footer {
+    padding: 1rem;
+  }
+}
+
+@media (max-width: 480px) {
+  body {
+    font-size: 12px;
+  }
+
+  .topbar {
+    padding: 0.4rem 0.5rem;
+  }
+
+  .brand span {
+    font-size: 0.9rem;
+  }
+
+  #analyzeBtn {
+    padding: 0.4rem 0.8rem;
+    font-size: 0.8rem;
+  }
+
+  .nav-tab {
+    padding: 0.35rem 0.5rem;
+    font-size: 0.72rem;
+  }
+
+  .live-badge {
+    font-size: 0.65rem;
+  }
+
+  .market-bar-inner {
+    gap: 0.5rem;
+  }
+
+  .market-sep {
+    display: none;
+  }
+
+  .chart-container {
+    height: 260px;
+  }
+
+  .volume-chart {
+    height: 120px;
+  }
+
+  .timeframe-bar {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+
+  .tf-btn {
+    padding: 0.3rem 0.6rem;
+    font-size: 0.72rem;
+  }
+
+  .pred-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .portfolio-header {
+    grid-template-columns: 1fr;
+  }
+
+  .bot-controls {
+    padding: 0.75rem 1rem;
+  }
+
+  .btn-bot,
+  .btn-scan,
+  .btn-reset {
+    padding: 0.5rem 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  .positions-table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .positions-table th,
+  .positions-table td {
+    font-size: 0.72rem;
+    padding: 0.35rem 0.25rem;
+  }
+
+  .section-title {
+    font-size: 1.1rem;
+  }
+
+  .pipe-step {
+    max-width: none;
   }
 }
 
