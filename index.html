@@ -6,11 +6,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StockSense AI — Live Trading Dashboard</title>
   <link rel="stylesheet" href="style.css?v=6" />
+  <!-- Razorpay Checkout Script -->
+  <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
 </head>
 
 <body>
 
+  <!-- Wallet Modal (imported from wallet.html) -->
+  <div id="walletPanel" class="wallet-panel hidden">
+    <div class="wallet-panel-content">
+      <span class="wallet-close" onclick="closeWallet()">&times;</span>
+      <h2>Wallet</h2>
+      <div class="wallet-balance">
+        <span>Balance:</span>
+        <span id="walletBalance">₹10,000.00</span>
+      </div>
+      <div class="wallet-actions">
+        <button onclick="showAddMoney()">Add Money</button>
+        <button onclick="showWithdrawMoney()">Withdraw</button>
+      </div>
+      <div id="walletActionArea"></div>
+      <div id="walletMessage" class="wallet-message hidden"></div>
+    </div>
+  </div>
 
   <nav class="topbar">
     <div class="brand">📈 <span>StockSense AI</span></div>
@@ -25,6 +44,8 @@
     <div class="nav-tabs">
       <button class="nav-tab active" onclick="switchTab('charts')">📊 Charts</button>
       <button class="nav-tab" onclick="switchTab('trading')">🤖 Auto Trade</button>
+      <button class="btn-wallet nav-btn" onclick="showWallet()">💰 Wallet</button>
+      <button class="btn-trade nav-btn" onclick="executeManualTrade()">🛒 Trade</button>
     </div>
     <div class="live-badge" id="liveBadge">
       <span class="dot"></span> LIVE
@@ -200,10 +221,9 @@
             <span id="botStatus">Bot: OFF</span>
           </div>
           <div class="bot-buttons">
-            <button class="btn-bot" id="toggleBotBtn" onclick="toggleBot()">⚡ Activate Bot</button>
-            <button class="btn-scan" onclick="runAutoScan()">🔍 Auto Scan & Trade</button>
-            <button class="btn-trade" onclick="executeManualTrade()">📈 Trade Current Ticker</button>
-            <button class="btn-reset" onclick="resetPortfolio()">🔄 Reset Portfolio</button>
+            <button class="btn-bot" id="toggleBotBtn" onclick="toggleBot()">⚡ Auto Bot</button>
+            <button class="btn-scan" onclick="runAutoScan()">🔍 Auto Scan</button>
+            <button class="btn-reset" onclick="resetPortfolio()">🔄 Reset</button>
           </div>
         </div>
 
