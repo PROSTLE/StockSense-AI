@@ -2,15 +2,14 @@
 // WALLET FUNCTIONS
 // ============================================================================
 
-let walletBalance = 10000.00; // Initial wallet balance
+let walletBalance = 1000000.00; // Initial wallet balance (synced with backend)
 
 function showWallet() {
   document.getElementById("walletPanel").classList.remove("hidden");
   document.getElementById("walletActionArea").innerHTML = "";
   document.getElementById("walletMessage").classList.add("hidden");
-  
-  // Load current wallet balance from backend
   loadWalletBalance();
+  loadWalletTransactions();
 }
 
 function closeWallet() {
@@ -21,21 +20,45 @@ async function loadWalletBalance() {
   try {
     const res = await fetch(`${API}/api/wallet/balance`);
     const data = await res.json();
-    
     if (data.balance !== undefined) {
       walletBalance = data.balance;
       document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
-      // Also update cash balance in portfolio if present
+      // Sync portfolio cash balance display
       const portBalanceEl = document.getElementById("portBalance");
       if (portBalanceEl) portBalanceEl.textContent = "₹" + formatNumber(walletBalance);
     }
   } catch (e) {
     console.error("Error loading wallet balance:", e);
-    // Fallback to local balance
     document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
-    // Also update cash balance in portfolio if present
-    const portBalanceEl = document.getElementById("portBalance");
-    if (portBalanceEl) portBalanceEl.textContent = "₹" + formatNumber(walletBalance);
+  }
+}
+
+async function loadWalletTransactions() {
+  try {
+    const res = await fetch(`${API}/api/wallet/transactions`);
+    const data = await res.json();
+    const list = document.getElementById("walletTxnList");
+    if (!data.transactions || data.transactions.length === 0) {
+      list.innerHTML = '<div class="wallet-txn-empty">No transactions yet</div>';
+      return;
+    }
+    list.innerHTML = data.transactions.slice(-10).reverse().map(txn => {
+      const date = new Date(txn.timestamp);
+      const dateStr = date.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' }) + ' ' +
+        date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+      const sign = txn.type === 'credit' ? '+' : '-';
+      return `
+        <div class="wallet-txn-item">
+          <div class="wallet-txn-left">
+            <span class="wallet-txn-type ${txn.type}">${txn.type === 'credit' ? '↓ Deposit' : '↑ Withdrawal'}</span>
+            <span class="wallet-txn-date">${dateStr}</span>
+          </div>
+          <span class="wallet-txn-amount" style="color: ${txn.type === 'credit' ? '#22c55e' : '#ef4444'}">${sign}₹${formatNumber(txn.amount)}</span>
+        </div>
+      `;
+    }).join("");
+  } catch (e) {
+    console.error("Error loading transactions:", e);
   }
 }
 
@@ -43,8 +66,8 @@ function showAddMoney() {
   document.getElementById("walletActionArea").innerHTML = `
     <div class='wallet-form'>
       <h3>Add Money</h3>
-      <input type='number' id='addAmount' placeholder='Enter amount' min='1' />
-      <button onclick='startRazorpayPayment()'>Add via Razorpay</button>
+      <input type='number' id='addAmount' placeholder='Enter amount (₹)' min='1' />
+      <button onclick='startRazorpayPayment()'>Pay with Razorpay</button>
     </div>
   `;
   document.getElementById("walletMessage").classList.add("hidden");
@@ -54,8 +77,8 @@ function showWithdrawMoney() {
   document.getElementById("walletActionArea").innerHTML = `
     <div class='wallet-form'>
       <h3>Withdraw Money</h3>
-      <input type='number' id='withdrawAmount' placeholder='Enter amount' min='1' />
-      <button onclick='startWithdraw()'>Withdraw</button>
+      <input type='number' id='withdrawAmount' placeholder='Enter amount (₹)' min='1' />
+      <button onclick='startWithdraw()'>Withdraw to Bank</button>
     </div>
   `;
   document.getElementById("walletMessage").classList.add("hidden");
@@ -66,11 +89,17 @@ function showWalletMessage(message, type = 'success') {
   msgEl.textContent = message;
   msgEl.className = `wallet-message ${type}`;
   msgEl.classList.remove("hidden");
-  
-  // Auto-hide after 5 seconds
+  setTimeout(() => { msgEl.classList.add("hidden"); }, 5000);
+}
+
+function quickAdd(amount) {
+  // Pre-fill the add money form and trigger Razorpay
+  showAddMoney();
   setTimeout(() => {
-    msgEl.classList.add("hidden");
-  }, 5000);
+    const input = document.getElementById('addAmount');
+    if (input) input.value = amount;
+    startRazorpayPayment();
+  }, 100);
 }
 
 // Razorpay integration
@@ -83,31 +112,29 @@ function startRazorpayPayment() {
 
   const amountInPaise = Math.round(parseFloat(amt) * 100);
 
-  // Create Razorpay order
   const options = {
-    key: 'rzp_test_SDdi0bRwia1AA4', // Your test key
+    key: 'rzp_test_SDdi0bRwia1AA4',
     amount: amountInPaise,
     currency: 'INR',
     name: 'StockSense Wallet',
     description: 'Add Money to Wallet',
     handler: function (response) {
-      // Payment successful - verify and credit wallet
       verifyAndCreditWallet(response.razorpay_payment_id, parseFloat(amt));
     },
     prefill: {
       name: 'User',
       email: 'user@example.com'
     },
-    theme: { 
-      color: '#22c55e' 
+    theme: {
+      color: '#22c55e'
     },
     modal: {
-      ondismiss: function() {
+      ondismiss: function () {
         showWalletMessage('Payment cancelled', 'error');
       }
     }
   };
-  
+
   try {
     const rzp = new Razorpay(options);
     rzp.open();
@@ -119,35 +146,29 @@ function startRazorpayPayment() {
 
 async function verifyAndCreditWallet(paymentId, amount) {
   try {
-    // Call backend to verify payment and credit wallet
     const res = await fetch(`${API}/api/wallet/add`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        payment_id: paymentId,
-        amount: amount
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payment_id: paymentId, amount: amount })
     });
 
     const data = await res.json();
 
-    if (data.status === 'success') {
+    if (res.ok && data.status === 'success') {
       walletBalance = data.new_balance;
       document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
-      showWalletMessage(`✅ ₹${formatNumber(amount)} added successfully! Payment ID: ${paymentId}`, 'success');
+      // Sync portfolio cash balance
+      const portBalanceEl = document.getElementById("portBalance");
+      if (portBalanceEl) portBalanceEl.textContent = "₹" + formatNumber(walletBalance);
+      showWalletMessage(`✅ ₹${formatNumber(amount)} added successfully!`, 'success');
       document.getElementById("walletActionArea").innerHTML = "";
+      loadWalletTransactions();
     } else {
-      showWalletMessage('Payment verification failed. Please contact support.', 'error');
+      showWalletMessage(data.detail || 'Payment verification failed. Contact support.', 'error');
     }
   } catch (e) {
     console.error("Wallet credit error:", e);
-    // Fallback - credit locally if backend fails
-    walletBalance += amount;
-    document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
-    showWalletMessage(`✅ ₹${formatNumber(amount)} added successfully! Payment ID: ${paymentId}`, 'success');
-    document.getElementById("walletActionArea").innerHTML = "";
+    showWalletMessage('Network error. Please check your connection and try again.', 'error');
   }
 }
 
@@ -160,48 +181,42 @@ async function startWithdraw() {
 
   const withdrawAmount = parseFloat(amt);
 
-  // Check if sufficient balance
   if (withdrawAmount > walletBalance) {
     showWalletMessage('Insufficient balance', 'error');
     return;
   }
 
-  // Confirm withdrawal
   if (!confirm(`Withdraw ₹${formatNumber(withdrawAmount)} from your wallet?`)) {
     return;
   }
 
   try {
-    // Call backend to process withdrawal
     const res = await fetch(`${API}/api/wallet/withdraw`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        amount: withdrawAmount
-      })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount: withdrawAmount })
     });
 
     const data = await res.json();
 
-    if (data.status === 'success') {
+    if (res.ok && data.status === 'success') {
       walletBalance = data.new_balance;
       document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
+      // Sync portfolio cash balance
+      const portBalanceEl = document.getElementById("portBalance");
+      if (portBalanceEl) portBalanceEl.textContent = "₹" + formatNumber(walletBalance);
       showWalletMessage(`✅ ₹${formatNumber(withdrawAmount)} withdrawn successfully!`, 'success');
       document.getElementById("walletActionArea").innerHTML = "";
+      loadWalletTransactions();
     } else {
-      showWalletMessage(data.message || 'Withdrawal failed', 'error');
+      showWalletMessage(data.detail || 'Withdrawal failed', 'error');
     }
   } catch (e) {
     console.error("Withdrawal error:", e);
-    // Fallback - deduct locally if backend fails
-    walletBalance -= withdrawAmount;
-    document.getElementById("walletBalance").textContent = "₹" + formatNumber(walletBalance);
-    showWalletMessage(`✅ ₹${formatNumber(withdrawAmount)} withdrawn successfully!`, 'success');
-    document.getElementById("walletActionArea").innerHTML = "";
+    showWalletMessage('Network error. Please check your connection and try again.', 'error');
   }
 }
+
 
 // ============================================================================
 // MAIN APP CODE
@@ -1040,3 +1055,667 @@ function formatVolume(v) {
 function formatNumber(n) {
   return parseFloat(n).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
+
+
+// ============================================================================
+// TRADE PANEL
+// ============================================================================
+
+let tradePanelTicker = "";
+let tradePanelPrice = 0;
+let tradePanelAction = "buy"; // "buy" or "sell"
+let tradePanelInterval = null;
+let accountValueChart = null;
+let watchlistRefreshInterval = null;
+
+function openTradePanel(ticker) {
+  const panel = document.getElementById("tradePanel");
+  panel.classList.remove("hidden");
+  document.body.style.overflow = "hidden";
+
+  // Set up trade search
+  const searchInput = document.getElementById("tradeSearchInput");
+  searchInput.value = "";
+  document.getElementById("tradeSearchDropdown").classList.add("hidden");
+
+  // Update market badge
+  updateTradePanelMarketBadge();
+
+  // Update wallet balance in summary
+  document.getElementById("tpSummaryBalance").textContent = "₹" + formatNumber(walletBalance);
+
+  if (ticker) {
+    selectTradeStock(ticker);
+    searchInput.value = ticker;
+  } else {
+    document.getElementById("tpStockCard").classList.add("hidden");
+  }
+
+  // Setup search listeners
+  setupTradePanelSearch();
+
+  // Load holdings, history, watchlist
+  loadTradeHoldings();
+  loadTradeHistory();
+  renderWatchlist();
+
+  // Start watchlist price refresh
+  if (watchlistRefreshInterval) clearInterval(watchlistRefreshInterval);
+  watchlistRefreshInterval = setInterval(refreshWatchlistPrices, 15000);
+}
+
+function closeTradePanel() {
+  document.getElementById("tradePanel").classList.add("hidden");
+  document.body.style.overflow = "";
+  if (tradePanelInterval) {
+    clearInterval(tradePanelInterval);
+    tradePanelInterval = null;
+  }
+  if (watchlistRefreshInterval) {
+    clearInterval(watchlistRefreshInterval);
+    watchlistRefreshInterval = null;
+  }
+}
+
+function switchTradeTab(tab) {
+  document.querySelectorAll(".tp-tab").forEach(t => t.classList.remove("active"));
+  document.querySelector(`.tp-tab[data-tab="${tab}"]`).classList.add("active");
+
+  document.querySelectorAll(".tp-tab-content").forEach(c => c.classList.add("hidden"));
+
+  if (tab === "search") {
+    document.getElementById("tpSearchTab").classList.remove("hidden");
+  } else if (tab === "holdings") {
+    document.getElementById("tpHoldingsTab").classList.remove("hidden");
+    loadTradeHoldings();
+  } else if (tab === "history") {
+    document.getElementById("tpHistoryTab").classList.remove("hidden");
+    loadTradeHistory();
+  } else if (tab === "watchlist") {
+    document.getElementById("tpWatchlistTab").classList.remove("hidden");
+    renderWatchlist();
+    refreshWatchlistPrices();
+  }
+}
+
+let tradeSearchTimeout = null;
+function setupTradePanelSearch() {
+  const input = document.getElementById("tradeSearchInput");
+  const dropdown = document.getElementById("tradeSearchDropdown");
+
+  // Remove old listeners by cloning
+  const newInput = input.cloneNode(true);
+  input.parentNode.replaceChild(newInput, input);
+
+  newInput.addEventListener("input", () => {
+    clearTimeout(tradeSearchTimeout);
+    const q = newInput.value.trim();
+    if (q.length < 1) {
+      dropdown.classList.add("hidden");
+      return;
+    }
+    tradeSearchTimeout = setTimeout(() => tradeSearchStocks(q), 250);
+  });
+
+  newInput.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") dropdown.classList.add("hidden");
+  });
+}
+
+async function tradeSearchStocks(query) {
+  const dropdown = document.getElementById("tradeSearchDropdown");
+  try {
+    const res = await fetch(`${API}/api/search?q=${encodeURIComponent(query)}`);
+    const data = await res.json();
+
+    if (!data.results || data.results.length === 0) {
+      dropdown.innerHTML = '<div class="tp-search-no-results">No stocks found</div>';
+      dropdown.classList.remove("hidden");
+      return;
+    }
+
+    dropdown.innerHTML = data.results.map(s => `
+      <div class="tp-search-item" data-ticker="${s.ticker}" data-name="${s.name}">
+        <span class="tp-search-ticker">${s.ticker}</span>
+        <span class="tp-search-name">${s.name}</span>
+      </div>
+    `).join("");
+
+    dropdown.querySelectorAll(".tp-search-item").forEach(item => {
+      item.addEventListener("click", () => {
+        const ticker = item.dataset.ticker;
+        document.getElementById("tradeSearchInput").value = ticker;
+        dropdown.classList.add("hidden");
+        selectTradeStock(ticker);
+      });
+    });
+
+    dropdown.classList.remove("hidden");
+  } catch (e) {
+    console.error("Trade search error:", e);
+    dropdown.classList.add("hidden");
+  }
+}
+
+async function selectTradeStock(ticker) {
+  tradePanelTicker = ticker;
+  const card = document.getElementById("tpStockCard");
+  card.classList.remove("hidden");
+
+  document.getElementById("tpStockTicker").textContent = ticker;
+  document.getElementById("tpStockName").textContent = ticker;
+  document.getElementById("tpStockPrice").textContent = "Loading...";
+  document.getElementById("tpStockChange").textContent = "";
+
+  // Check if in watchlist
+  updateWatchlistButton(ticker);
+
+  // Fetch live price
+  await updateTradePanelPrice(ticker);
+
+  // Auto-refresh price every 10s
+  if (tradePanelInterval) clearInterval(tradePanelInterval);
+  tradePanelInterval = setInterval(() => updateTradePanelPrice(ticker), 10000);
+
+  // Also fetch stock info for name
+  try {
+    const infoRes = await fetch(`${API}/api/stock/${ticker}`);
+    const infoData = await infoRes.json();
+    if (infoData.info && infoData.info.name) {
+      document.getElementById("tpStockName").textContent = infoData.info.name;
+    }
+  } catch (e) { /* ignore */ }
+
+  // Check if position exists to default to sell
+  try {
+    const portRes = await fetch(`${API}/api/trade/portfolio`);
+    const portData = await portRes.json();
+    if (portData.positions && portData.positions[ticker]) {
+      setTradeAction("sell");
+    } else {
+      setTradeAction("buy");
+    }
+  } catch (e) { /* ignore */ }
+}
+
+async function updateTradePanelPrice(ticker) {
+  try {
+    const res = await fetch(`${API}/api/live/${ticker}`);
+    const data = await res.json();
+    tradePanelPrice = data.price;
+
+    document.getElementById("tpStockPrice").textContent = "₹" + formatPrice(data.price);
+    const sign = data.change >= 0 ? "+" : "";
+    const changeEl = document.getElementById("tpStockChange");
+    changeEl.textContent = `${sign}${data.change} (${sign}${data.change_pct}%)`;
+    changeEl.className = `tp-stock-change ${data.direction}`;
+
+    document.getElementById("tpSummaryPrice").textContent = "₹" + formatPrice(data.price);
+    updateOrderSummary();
+  } catch (e) {
+    console.error("Trade panel price error:", e);
+  }
+}
+
+function setTradeAction(action) {
+  tradePanelAction = action;
+  const buyBtn = document.getElementById("tpBuyBtn");
+  const sellBtn = document.getElementById("tpSellBtn");
+  const execBtn = document.getElementById("tpExecuteBtn");
+
+  if (action === "buy") {
+    buyBtn.classList.add("active");
+    buyBtn.classList.remove("sell");
+    sellBtn.classList.remove("active");
+    execBtn.textContent = "⚡ Place BUY Order";
+    execBtn.className = "tp-execute-btn buy";
+  } else {
+    sellBtn.classList.add("active");
+    buyBtn.classList.remove("active");
+    execBtn.textContent = "⚡ Place SELL Order";
+    execBtn.className = "tp-execute-btn sell-mode";
+  }
+}
+
+function updateOrderSummary() {
+  const qty = parseInt(document.getElementById("tpQuantity").value) || 1;
+  const total = qty * tradePanelPrice;
+  document.getElementById("tpSummaryQty").textContent = qty;
+  document.getElementById("tpSummaryTotal").textContent = "₹" + formatNumber(total);
+  document.getElementById("tpSummaryBalance").textContent = "₹" + formatNumber(walletBalance);
+}
+
+// Attach qty input listener
+document.addEventListener("DOMContentLoaded", () => {
+  // Delayed to ensure element exists
+  setTimeout(() => {
+    const qtyInput = document.getElementById("tpQuantity");
+    if (qtyInput) {
+      qtyInput.addEventListener("input", updateOrderSummary);
+    }
+  }, 500);
+});
+
+
+async function executeTradeFromPanel() {
+  if (!tradePanelTicker) {
+    alert("Select a stock first!");
+    return;
+  }
+
+  const btn = document.getElementById("tpExecuteBtn");
+  const origText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Processing...";
+
+  try {
+    if (tradePanelAction === "buy") {
+      // Execute buy via the AI trade endpoint
+      const res = await fetch(`${API}/api/trade/execute/${tradePanelTicker}`, { method: "POST" });
+      const data = await res.json();
+
+      if (data.action === "BUY" && data.trade_result) {
+        const tr = data.trade_result;
+        alert(`✅ Bought ${tr.shares} shares of ${tradePanelTicker} @ ₹${data.current_price}\nSL: ₹${tr.stop_loss} | TP: ₹${tr.tp1}`);
+        addToFeed(`🟢 <strong>BOUGHT ${tr.shares} x ${tradePanelTicker}</strong> @ ₹${data.current_price}`, "buy");
+      } else if (data.action === "WAIT") {
+        alert(`⏸ AI recommends WAIT for ${tradePanelTicker}.\nReason: ${data.reason || "Conditions not met"}`);
+      } else if (data.action === "HOLD") {
+        alert(`📊 Already holding ${tradePanelTicker}. AI says HOLD.`);
+      } else if (data.action === "SELL" && data.trade_result) {
+        const tr = data.trade_result;
+        alert(`🔴 AI triggered SELL for ${tradePanelTicker}\nP&L: ₹${tr.profit} (${tr.profit_pct}%)`);
+        addToFeed(`🔴 <strong>SOLD ${tradePanelTicker}</strong> | P&L: ₹${tr.profit}`, "sell");
+      }
+    } else {
+      // Execute sell
+      const res = await fetch(`${API}/api/trade/sell/${tradePanelTicker}`, { method: "POST" });
+      const data = await res.json();
+
+      if (data.status === "sold") {
+        const profitSign = data.profit >= 0 ? "+" : "";
+        alert(`✅ Sold ${tradePanelTicker} @ ₹${data.price}\nP&L: ${profitSign}₹${data.profit} (${profitSign}${data.profit_pct}%)`);
+        addToFeed(`🔴 <strong>SOLD ${tradePanelTicker}</strong> @ ₹${data.price} | P&L: ${profitSign}₹${data.profit}`, "sell");
+      } else {
+        alert(`⚠️ ${data.reason || "Could not sell"}`);
+      }
+    }
+
+    // Reload
+    loadPortfolio();
+    loadWalletBalance();
+    loadTradeHoldings();
+    loadTradeHistory();
+    updateOrderSummary();
+
+  } catch (e) {
+    console.error("Trade execution error:", e);
+    alert(`❌ Trade failed: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+
+// ── Holdings Tab ────────────────────────────────────────
+
+async function loadTradeHoldings() {
+  const list = document.getElementById("tpHoldingsList");
+  try {
+    const res = await fetch(`${API}/api/trade/portfolio`);
+    const data = await res.json();
+    const positions = data.positions || {};
+
+    if (Object.keys(positions).length === 0) {
+      list.innerHTML = '<div class="tp-empty">No holdings. Start trading to see your positions here.</div>';
+      return;
+    }
+
+    list.innerHTML = Object.entries(positions).map(([ticker, pos]) => {
+      const pnl = pos.unrealized_pnl || 0;
+      const pnlPct = pos.pnl_pct || 0;
+      const pnlClass = pnl >= 0 ? "positive" : "negative";
+      const pnlSign = pnl >= 0 ? "+" : "";
+      const currentPrice = pos.current_price || pos.buy_price;
+
+      return `
+        <div class="tp-holding-card">
+          <div class="tp-holding-main">
+            <div class="tp-holding-left">
+              <span class="tp-holding-ticker">${ticker}</span>
+              <span class="tp-holding-shares">${pos.shares} shares @ ₹${pos.buy_price}</span>
+            </div>
+            <div class="tp-holding-right">
+              <span class="tp-holding-price">₹${formatPrice(currentPrice)}</span>
+              <span class="tp-holding-pnl ${pnlClass}">${pnlSign}₹${formatNumber(Math.abs(pnl))} (${pnlSign}${pnlPct}%)</span>
+            </div>
+          </div>
+          <div class="tp-holding-actions">
+            <button class="tp-holding-trade-btn" onclick="selectTradeStock('${ticker}'); switchTradeTab('search');">Trade</button>
+            <button class="tp-holding-sell-btn" onclick="forceSellFromPanel('${ticker}')">Quick Sell</button>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+  } catch (e) {
+    console.error("Holdings load error:", e);
+    list.innerHTML = '<div class="tp-empty">Error loading holdings</div>';
+  }
+}
+
+async function forceSellFromPanel(ticker) {
+  if (!confirm(`Sell all ${ticker} shares at market price?`)) return;
+  try {
+    const res = await fetch(`${API}/api/trade/sell/${ticker}`, { method: "POST" });
+    const data = await res.json();
+    if (data.status === "sold") {
+      const profitSign = data.profit >= 0 ? "+" : "";
+      alert(`✅ Sold ${ticker} @ ₹${data.price}\nP&L: ${profitSign}₹${data.profit}`);
+      addToFeed(`🔴 <strong>SOLD ${ticker}</strong> @ ₹${data.price}`, "sell");
+    } else {
+      alert(data.reason || "Could not sell");
+    }
+    loadTradeHoldings();
+    loadPortfolio();
+    loadWalletBalance();
+  } catch (e) {
+    alert(`Error: ${e.message}`);
+  }
+}
+
+
+// ── History Tab ─────────────────────────────────────────
+
+async function loadTradeHistory() {
+  const list = document.getElementById("tpHistoryList");
+  try {
+    const res = await fetch(`${API}/api/trade/portfolio`);
+    const data = await res.json();
+    const trades = data.trade_history || [];
+
+    if (trades.length === 0) {
+      list.innerHTML = '<div class="tp-empty">No trade history yet. Complete a trade to see it here.</div>';
+      return;
+    }
+
+    list.innerHTML = [...trades].reverse().map(t => {
+      const profit = (typeof t.profit === "number" && !isNaN(t.profit)) ? t.profit : 0;
+      const profitPct = (typeof t.profit_pct === "number" && !isNaN(t.profit_pct)) ? t.profit_pct : 0;
+      const profitClass = profit >= 0 ? "positive" : "negative";
+      const profitSign = profit >= 0 ? "+" : "";
+      const time = new Date(t.sell_time).toLocaleString("en-IN");
+
+      return `
+        <div class="tp-history-card">
+          <div class="tp-history-main">
+            <div class="tp-history-left">
+              <span class="tp-history-ticker">${t.ticker}</span>
+              <span class="tp-history-details">${t.shares} shares @ ₹${t.buy_price} → ₹${t.sell_price}</span>
+              <span class="tp-history-time">${time}</span>
+            </div>
+            <div class="tp-history-right">
+              <span class="tp-history-pnl ${profitClass}">${profitSign}₹${formatNumber(Math.abs(profit))}</span>
+              <span class="tp-history-pnl-pct ${profitClass}">${profitSign}${profitPct}%</span>
+            </div>
+          </div>
+          <span class="tp-history-reason">${t.reason || ""}</span>
+        </div>
+      `;
+    }).join("");
+
+  } catch (e) {
+    console.error("History load error:", e);
+    list.innerHTML = '<div class="tp-empty">Error loading trade history</div>';
+  }
+}
+
+
+// ── Watchlist ───────────────────────────────────────────
+
+function getWatchlist() {
+  try {
+    return JSON.parse(localStorage.getItem("stocksense_watchlist") || "[]");
+  } catch (e) { return []; }
+}
+
+function saveWatchlist(wl) {
+  localStorage.setItem("stocksense_watchlist", JSON.stringify(wl));
+}
+
+function addToWatchlist(ticker) {
+  const wl = getWatchlist();
+  if (!wl.includes(ticker)) {
+    wl.push(ticker);
+    saveWatchlist(wl);
+  }
+}
+
+function removeFromWatchlist(ticker) {
+  let wl = getWatchlist();
+  wl = wl.filter(t => t !== ticker);
+  saveWatchlist(wl);
+  renderWatchlist();
+}
+
+function toggleWatchlistFromPanel() {
+  if (!tradePanelTicker) return;
+  const wl = getWatchlist();
+  if (wl.includes(tradePanelTicker)) {
+    removeFromWatchlist(tradePanelTicker);
+  } else {
+    addToWatchlist(tradePanelTicker);
+  }
+  updateWatchlistButton(tradePanelTicker);
+  renderWatchlist();
+}
+
+function updateWatchlistButton(ticker) {
+  const btn = document.getElementById("tpWatchlistBtn");
+  const wl = getWatchlist();
+  if (wl.includes(ticker)) {
+    btn.textContent = "⭐ Remove from Watchlist";
+    btn.classList.add("in-watchlist");
+  } else {
+    btn.textContent = "☆ Add to Watchlist";
+    btn.classList.remove("in-watchlist");
+  }
+}
+
+function renderWatchlist() {
+  const list = document.getElementById("tpWatchlistList");
+  const wl = getWatchlist();
+
+  if (wl.length === 0) {
+    list.innerHTML = '<div class="tp-empty">Your watchlist is empty. Search for a stock and click ⭐ to add.</div>';
+    return;
+  }
+
+  list.innerHTML = wl.map(ticker => `
+    <div class="tp-watchlist-item" id="wl-${ticker.replace('.', '-')}">
+      <div class="tp-wl-left" onclick="selectTradeStock('${ticker}'); switchTradeTab('search');" style="cursor:pointer;">
+        <span class="tp-wl-ticker">${ticker}</span>
+        <span class="tp-wl-price" id="wlPrice-${ticker.replace('.', '-')}">—</span>
+      </div>
+      <div class="tp-wl-right">
+        <span class="tp-wl-change" id="wlChange-${ticker.replace('.', '-')}">—</span>
+        <button class="tp-wl-remove" onclick="removeFromWatchlist('${ticker}')" title="Remove">✕</button>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function refreshWatchlistPrices() {
+  const wl = getWatchlist();
+  for (const ticker of wl) {
+    try {
+      const res = await fetch(`${API}/api/live/${ticker}`);
+      const data = await res.json();
+      const safeId = ticker.replace('.', '-');
+      const priceEl = document.getElementById(`wlPrice-${safeId}`);
+      const changeEl = document.getElementById(`wlChange-${safeId}`);
+      if (priceEl) priceEl.textContent = "₹" + formatPrice(data.price);
+      if (changeEl) {
+        const sign = data.change >= 0 ? "+" : "";
+        changeEl.textContent = `${sign}${data.change_pct}%`;
+        changeEl.className = `tp-wl-change ${data.direction}`;
+      }
+    } catch (e) { /* ignore */ }
+  }
+}
+
+
+// ── Market Hours Detection (IST) ────────────────────────
+
+function isIndianMarketOpen() {
+  const now = new Date();
+  // Convert to IST (UTC+5:30)
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const ist = new Date(utc + 5.5 * 3600000);
+
+  const day = ist.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+
+  const hours = ist.getHours();
+  const minutes = ist.getMinutes();
+  const timeMinutes = hours * 60 + minutes;
+
+  // 9:15 AM to 3:30 PM IST
+  return timeMinutes >= 555 && timeMinutes <= 930;
+}
+
+function updateTradePanelMarketBadge() {
+  const live = isIndianMarketOpen();
+  const badge = document.getElementById("tpMarketBadge");
+  const status = document.getElementById("tpMarketStatus");
+  const dot = badge ? badge.querySelector(".dot") : null;
+
+  if (status) status.textContent = live ? "MARKET OPEN" : "MARKET CLOSED";
+  if (dot) {
+    dot.style.background = live ? "#22c55e" : "#6b7280";
+    dot.style.animation = live ? "pulse 1.5s infinite" : "none";
+  }
+  if (badge) badge.className = `tp-market-badge ${live ? "live" : "offline"}`;
+}
+
+
+// ── Account Value Chart ─────────────────────────────────
+
+async function drawAccountValueChart() {
+  try {
+    const res = await fetch(`${API}/api/portfolio/value-history`);
+    const data = await res.json();
+    const snapshots = data.snapshots || [];
+
+    if (snapshots.length === 0) return;
+
+    // Also add current value
+    try {
+      const portRes = await fetch(`${API}/api/trade/portfolio`);
+      const portData = await portRes.json();
+      const currentVal = portData.total_value || portData.balance;
+      snapshots.push({
+        timestamp: new Date().toISOString(),
+        value: currentVal,
+      });
+    } catch (e) { /* ignore */ }
+
+    const labels = snapshots.map(s => {
+      const d = new Date(s.timestamp);
+      return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" }) + " " +
+        d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+    });
+    const values = snapshots.map(s => s.value);
+
+    const isUp = values[values.length - 1] >= values[0];
+    const lineColor = isUp ? "#22c55e" : "#ef4444";
+    const fillColor = isUp ? "rgba(34,197,94,0.1)" : "rgba(239,68,68,0.1)";
+
+    if (accountValueChart) accountValueChart.destroy();
+
+    const ctx = document.getElementById("accountValueChart");
+    if (!ctx) return;
+
+    accountValueChart = new Chart(ctx.getContext("2d"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [{
+          label: "Account Value",
+          data: values,
+          borderColor: lineColor,
+          backgroundColor: fillColor,
+          fill: true,
+          tension: 0.4,
+          pointRadius: values.length > 20 ? 0 : 3,
+          borderWidth: 2,
+          pointBackgroundColor: lineColor,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: "#1a1f2e",
+            borderColor: "#242a38",
+            borderWidth: 1,
+            titleColor: "#fff",
+            bodyColor: "#d1d5db",
+            callbacks: {
+              label: (ctx) => "₹" + formatNumber(ctx.parsed.y),
+            },
+          },
+        },
+        scales: {
+          x: {
+            ticks: { color: "#4b5563", maxTicksLimit: 6, maxRotation: 0, font: { size: 9 } },
+            grid: { color: "#1f2937" },
+          },
+          y: {
+            ticks: {
+              color: "#4b5563",
+              font: { size: 10 },
+              callback: (v) => "₹" + (v / 1000).toFixed(0) + "K",
+            },
+            grid: { color: "#1f2937" },
+          },
+        },
+      },
+    });
+
+    // Update market badge on account value section
+    updateAccountValueMarketBadge();
+
+  } catch (e) {
+    console.error("Account value chart error:", e);
+  }
+}
+
+function updateAccountValueMarketBadge() {
+  const live = isIndianMarketOpen();
+  const dot = document.getElementById("avMarketDot");
+  const label = document.getElementById("avMarketLabel");
+  const badge = document.getElementById("avMarketBadge");
+
+  if (label) label.textContent = live ? "LIVE" : "OFFLINE";
+  if (dot) {
+    dot.style.background = live ? "#22c55e" : "#6b7280";
+    dot.style.animation = live ? "pulse 1.5s infinite" : "none";
+  }
+  if (badge) badge.className = `av-market-badge ${live ? "live" : "offline"}`;
+}
+
+// Load account value chart when switching to trading tab
+const origSwitchTab = switchTab;
+switchTab = function (tab) {
+  origSwitchTab(tab);
+  if (tab === "trading") {
+    setTimeout(drawAccountValueChart, 300);
+  }
+};
+
+// Initial market badge update
+setInterval(updateAccountValueMarketBadge, 60000);
