@@ -1,0 +1,90 @@
+<!-- wallet.html: Simple wallet modal for add/withdraw money -->
+<div id="walletModal" class="wallet-modal hidden">
+  <div class="wallet-modal-content">
+    <span class="wallet-close" onclick="closeWallet()">&times;</span>
+    <h2>Wallet</h2>
+    <div class="wallet-balance">
+      <span>Balance:</span>
+      <span id="walletBalance">₹0.00</span>
+    </div>
+    <div class="wallet-actions">
+      <button onclick="showAddMoney()">Add Money</button>
+      <button onclick="showWithdrawMoney()">Withdraw</button>
+    </div>
+    <div id="walletActionArea"></div>
+  </div>
+</div>
+
+<!-- Add Money Form (hidden by default) -->
+<div id="addMoneyForm" class="wallet-form hidden">
+  <h3>Add Money</h3>
+  <input type="number" id="addAmount" placeholder="Enter amount" min="1" />
+  <button onclick="startRazorpayPayment()">Add via Razorpay</button>
+</div>
+
+<!-- Withdraw Money Form (hidden by default) -->
+<div id="withdrawMoneyForm" class="wallet-form hidden">
+  <h3>Withdraw Money</h3>
+  <input type="number" id="withdrawAmount" placeholder="Enter amount" min="1" />
+  <button onclick="startWithdraw()">Withdraw</button>
+</div>
+
+<style>
+.wallet-modal {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+.wallet-modal-content {
+  background: #181c24;
+  padding: 2rem 2.5rem;
+  border-radius: 12px;
+  min-width: 340px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+  position: relative;
+}
+.wallet-close {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  font-size: 1.5rem;
+  color: #aaa;
+  cursor: pointer;
+}
+.wallet-balance {
+  font-size: 1.2rem;
+  margin-bottom: 1.2rem;
+  display: flex;
+  justify-content: space-between;
+}
+.wallet-actions {
+  display: flex;
+  gap: 1rem;
+  margin-bottom: 1.2rem;
+}
+.wallet-form {
+  margin-top: 1rem;
+}
+.wallet-form input {
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #242a38;
+  background: #23283a;
+  color: #fff;
+  margin-bottom: 0.7rem;
+  width: 100%;
+}
+.wallet-form button {
+  background: var(--green);
+  color: #000;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1.2rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+</style>
