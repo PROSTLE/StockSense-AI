@@ -59,6 +59,93 @@ def toggle_bot() -> dict:
     return {"bot_active": state["bot_active"]}
 
 
+def add_to_balance(amount: float, payment_id: str = "") -> dict:
+    """Add funds to the portfolio balance (wallet top-up)."""
+    with _lock:
+        state = _load_state()
+        state["balance"] += amount
+        state["balance"] = round(state["balance"], 2)
+        # Also bump initial_balance so reset reflects deposits
+        state["initial_balance"] = round(state.get("initial_balance", INITIAL_BALANCE) + amount, 2)
+        # Record transaction
+        txn = {
+            "type": "credit",
+            "amount": amount,
+            "payment_id": payment_id,
+            "timestamp": datetime.now().isoformat(),
+            "status": "success",
+        }
+        state.setdefault("wallet_transactions", []).append(txn)
+        _save_state(state)
+    return {"status": "success", "new_balance": state["balance"], "transaction": txn}
+
+
+def withdraw_from_balance(amount: float) -> dict:
+    """Withdraw funds from the portfolio balance."""
+    with _lock:
+        state = _load_state()
+        if amount > state["balance"]:
+            return {"status": "error", "message": "Insufficient balance"}
+        state["balance"] -= amount
+        state["balance"] = round(state["balance"], 2)
+        state["initial_balance"] = round(state.get("initial_balance", INITIAL_BALANCE) - amount, 2)
+        txn = {
+            "type": "debit",
+            "amount": amount,
+            "timestamp": datetime.now().isoformat(),
+            "status": "success",
+        }
+        state.setdefault("wallet_transactions", []).append(txn)
+        _save_state(state)
+    return {"status": "success", "new_balance": state["balance"], "transaction": txn}
+
+
+def get_wallet_transactions() -> list:
+    """Return wallet transaction history."""
+    with _lock:
+        state = _load_state()
+    return state.get("wallet_transactions", [])
+
+
+def record_portfolio_snapshot(total_value: float):
+    """Record a portfolio value snapshot for the account value chart."""
+    with _lock:
+        state = _load_state()
+        snapshots = state.setdefault("value_history", [])
+        snapshots.append({
+            "timestamp": datetime.now().isoformat(),
+            "value": round(total_value, 2),
+        })
+        # Keep at most 500 snapshots
+        if len(snapshots) > 500:
+            snapshots[:] = snapshots[-500:]
+        _save_state(state)
+
+
+def get_value_history() -> list:
+    """Return portfolio value snapshots for the account value chart."""
+    with _lock:
+        state = _load_state()
+
+    snapshots = list(state.get("value_history", []))
+
+    # If no snapshots yet, synthesize from trade history
+    if not snapshots:
+        initial = state.get("initial_balance", INITIAL_BALANCE)
+        created = state.get("created_at", datetime.now().isoformat())
+        snapshots.append({"timestamp": created, "value": initial})
+
+        running = initial
+        for t in state.get("trade_history", []):
+            running += t.get("profit", 0)
+            snapshots.append({
+                "timestamp": t.get("sell_time", t.get("buy_time", "")),
+                "value": round(running, 2),
+            })
+
+    return snapshots
+
+
 def compute_dynamic_levels(
     current_price: float,
     atr: float,
@@ -210,6 +297,13 @@ def execute_buy(
         state["positions"][ticker] = position
         _save_state(state)
 
+        # Record portfolio value snapshot
+        try:
+            pos_value = sum(p["shares"] * p["buy_price"] for p in state["positions"].values())
+            record_portfolio_snapshot(state["balance"] + pos_value)
+        except Exception:
+            pass
+
         return {
             "status": "bought",
             "ticker": ticker,
@@ -256,6 +350,13 @@ def execute_sell(ticker: str, current_price: float, reason: str) -> dict:
         state["trade_history"].append(trade)
         del state["positions"][ticker]
         _save_state(state)
+
+        # Record portfolio value snapshot
+        try:
+            pos_value = sum(p["shares"] * p["buy_price"] for p in state["positions"].values())
+            record_portfolio_snapshot(state["balance"] + pos_value)
+        except Exception:
+            pass
 
         return {
             "status": "sold",
