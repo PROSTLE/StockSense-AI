@@ -100,12 +100,27 @@ def analyze_sentiment(ticker: str) -> dict:
             "details": [],
             "overall_sentiment": "neutral",
             "overall_score": 0.0,
+            "contradictory_dampened": False,
             "method": "VADER (40%) + FinBERT (60%) ensemble",
         }
 
     details = [_score_text(h) for h in headlines]
+    raw_scores = [d["combined_score"] for d in details]
+    avg = float(np.mean(raw_scores))
 
-    avg = float(np.mean([d["combined_score"] for d in details]))
+    # Dampen one-off outliers: e.g. one strong positive headline amid sell-off
+    # shouldn't override macro. Use variance and median to detect contradiction.
+    contradictory_dampened = False
+    n = len(raw_scores)
+    if n >= 2:
+        variance = float(np.var(raw_scores))
+        median = float(np.median(raw_scores))
+        # High variance or mean far from median => contradictory/one-off dominated
+        contradictory = variance > 0.15 or abs(avg - median) > 0.35
+        if contradictory:
+            contradictory_dampened = True
+            # Pull toward median (reduces impact of single extreme headline)
+            avg = 0.4 * avg + 0.6 * median
 
     if avg > 0.15:
         overall = "positive"
@@ -120,5 +135,6 @@ def analyze_sentiment(ticker: str) -> dict:
         "details": details,
         "overall_sentiment": overall,
         "overall_score": round(avg, 4),
+        "contradictory_dampened": contradictory_dampened,
         "method": "VADER (40%) + FinBERT (60%) ensemble",
     }
