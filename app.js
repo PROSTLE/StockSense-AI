@@ -241,6 +241,8 @@ document.addEventListener("DOMContentLoaded", () => {
   loadMarketIndices();
   loadWalletBalance();
   setupTimeframeButtons();
+  updateTopbarLiveBadge();
+  setInterval(updateTopbarLiveBadge, 60000);
   portfolioInterval = setInterval(loadPortfolio, 15000);
   setInterval(loadMarketIndices, 30000);
 
@@ -1719,3 +1721,20 @@ switchTab = function (tab) {
 
 // Initial market badge update
 setInterval(updateAccountValueMarketBadge, 60000);
+
+// Topbar live badge: green during Indian market hours, red when closed
+function updateTopbarLiveBadge() {
+  const live = isIndianMarketOpen();
+  const badge = document.getElementById("liveBadge");
+  const textEl = document.getElementById("liveBadgeText");
+  const dot = badge ? badge.querySelector(".dot") : null;
+  if (textEl) textEl.textContent = live ? "LIVE" : "CLOSED";
+  if (badge) {
+    badge.classList.remove("live", "closed");
+    badge.classList.add(live ? "live" : "closed");
+  }
+  if (dot) {
+    dot.style.background = live ? "#22c55e" : "#ef4444";
+    dot.style.animation = live ? "pulse 1.5s infinite" : "none";
+  }
+}
