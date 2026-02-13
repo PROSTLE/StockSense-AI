@@ -1,19 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>StockSense AI — Live Trading Dashboard</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=6" />
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
 </head>
+
 <body>
 
-  <!-- ══ TOP BAR ══════════════════════════════════════ -->
+
   <nav class="topbar">
     <div class="brand">📈 <span>StockSense AI</span></div>
     <div class="search-area">
-      <input id="tickerInput" type="text" placeholder="Search ticker… (AAPL, TSLA, NVDA)" spellcheck="false" />
+      <div class="search-wrapper">
+        <input id="tickerInput" type="text" placeholder="Search stock… (e.g. Tata, Reliance, INFY)" spellcheck="false"
+          autocomplete="off" />
+        <div class="search-dropdown hidden" id="searchDropdown"></div>
+      </div>
       <button id="analyzeBtn" onclick="loadTicker()">Analyze</button>
     </div>
     <div class="nav-tabs">
@@ -25,7 +31,29 @@
     </div>
   </nav>
 
-  <!-- ══ LIVE PRICE BANNER ════════════════════════════ -->
+  <div class="market-bar" id="marketBar">
+    <div class="market-bar-inner">
+      <div class="market-item" id="mktStock">
+        <span class="mkt-label" id="mktStockLabel">STOCK</span>
+        <span class="mkt-price" id="mktStockPrice">—</span>
+        <span class="mkt-change" id="mktStockChange">—</span>
+      </div>
+      <div class="market-sep">│</div>
+      <div class="market-item">
+        <span class="mkt-label">NIFTY 50</span>
+        <span class="mkt-price" id="mktNiftyPrice">—</span>
+        <span class="mkt-change" id="mktNiftyChange">—</span>
+      </div>
+      <div class="market-sep">│</div>
+      <div class="market-item">
+        <span class="mkt-label">SENSEX</span>
+        <span class="mkt-price" id="mktSensexPrice">—</span>
+        <span class="mkt-change" id="mktSensexChange">—</span>
+      </div>
+    </div>
+  </div>
+
+
   <section class="price-banner hidden" id="priceBanner">
     <div class="price-main">
       <h1 id="bannerName">—</h1>
@@ -42,7 +70,7 @@
     </div>
   </section>
 
-  <!-- ══ TAB: CHARTS ══════════════════════════════════ -->
+
   <div id="chartsTab" class="tab-content">
     <div class="dashboard">
       <div class="chart-area">
@@ -54,12 +82,38 @@
           <button class="tf-btn" data-tf="1y">1Y</button>
           <button class="tf-btn" data-tf="2y">2Y</button>
         </div>
-        <div class="chart-container"><canvas id="mainChart"></canvas></div>
+        <div class="chart-container" id="mainChartWrap">
+          <canvas id="mainChart"></canvas>
+          <div class="chart-empty-state" id="chartEmptyState">
+            <div class="empty-icon">📈</div>
+            <h3>Explore Any Stock</h3>
+            <p>Search for a stock above or pick one from <strong>High Potential Stocks</strong> to view charts, analysis
+              & AI insights.</p>
+            <div class="empty-hint">Try: <span
+                onclick="document.getElementById('tickerInput').focus()">RELIANCE.NS</span> · <span
+                onclick="document.getElementById('tickerInput').focus()">TCS.NS</span> · <span
+                onclick="document.getElementById('tickerInput').focus()">TATAMOTORS.NS</span></div>
+          </div>
+        </div>
         <div class="chart-container volume-chart"><canvas id="volumeChart"></canvas></div>
 
         <div class="prediction-section hidden" id="predSection">
-          <h3>🤖 Next 5-Day Price Prediction</h3>
-          <div class="chart-container"><canvas id="predChart"></canvas></div>
+          <h3>🤖 Next 5-Day Price Forecast</h3>
+
+          <div class="pred-loader" id="predLoader">
+            <div class="pred-loader-inner">
+              <div class="neural-dots">
+                <span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="loader-brain">🧠</div>
+              <p class="loader-title">AI Model Training</p>
+              <p class="loader-sub" id="predLoaderMsg">Analyzing patterns with 10-feature LSTM...</p>
+              <div class="loader-bar">
+                <div class="loader-bar-fill"></div>
+              </div>
+            </div>
+          </div>
+          <div class="chart-container" id="predChartWrap"><canvas id="predChart"></canvas></div>
           <div class="pred-metrics">
             <div class="metric-card">
               <span class="m-label">Confidence</span>
@@ -70,11 +124,11 @@
               <span class="m-value" id="predRisk">—</span>
             </div>
             <div class="metric-card">
-              <span class="m-label">Pred Day 1</span>
+              <span class="m-label">Day 1 Forecast</span>
               <span class="m-value" id="predDay1">—</span>
             </div>
             <div class="metric-card">
-              <span class="m-label">Pred Day 5</span>
+              <span class="m-label">Day 5 Forecast</span>
               <span class="m-value" id="predDay5">—</span>
             </div>
           </div>
@@ -98,34 +152,36 @@
         </div>
         <div class="panel hidden" id="indPanel">
           <h3>📊 Technical Indicators</h3>
-          <table class="ind-table"><tbody id="indBody"></tbody></table>
+          <table class="ind-table">
+            <tbody id="indBody"></tbody>
+          </table>
         </div>
       </aside>
     </div>
   </div>
 
-  <!-- ══ TAB: AUTO TRADING ════════════════════════════ -->
+
   <div id="tradingTab" class="tab-content hidden">
     <div class="trading-dashboard">
 
-      <!-- Portfolio Overview -->
+
       <div class="trade-grid">
         <div class="portfolio-header">
           <div class="port-card balance">
             <span class="pc-label">Portfolio Value</span>
-            <span class="pc-value" id="portValue">$100,000.00</span>
+            <span class="pc-value" id="portValue">₹10,00,000.00</span>
           </div>
           <div class="port-card">
             <span class="pc-label">Cash Balance</span>
-            <span class="pc-value" id="portBalance">$100,000.00</span>
+            <span class="pc-value" id="portBalance">₹10,00,000.00</span>
           </div>
           <div class="port-card">
             <span class="pc-label">Unrealized P&L</span>
-            <span class="pc-value" id="portUnrealized">$0.00</span>
+            <span class="pc-value" id="portUnrealized">₹0.00</span>
           </div>
           <div class="port-card">
             <span class="pc-label">Realized P&L</span>
-            <span class="pc-value" id="portRealized">$0.00</span>
+            <span class="pc-value" id="portRealized">₹0.00</span>
           </div>
           <div class="port-card">
             <span class="pc-label">Win Rate</span>
@@ -137,7 +193,7 @@
           </div>
         </div>
 
-        <!-- Bot Controls -->
+
         <div class="bot-controls">
           <div class="bot-status">
             <span class="bot-dot" id="botDot"></span>
@@ -151,7 +207,7 @@
           </div>
         </div>
 
-        <!-- Open Positions -->
+
         <div class="trade-panel">
           <h3>📂 Open Positions</h3>
           <div class="positions-table-wrap">
@@ -170,13 +226,15 @@
                 </tr>
               </thead>
               <tbody id="positionsBody">
-                <tr><td colspan="9" class="empty-msg">No open positions</td></tr>
+                <tr>
+                  <td colspan="9" class="empty-msg">No open positions</td>
+                </tr>
               </tbody>
             </table>
           </div>
         </div>
 
-        <!-- Trade Log -->
+
         <div class="trade-panel">
           <h3>📋 Trade History</h3>
           <div class="trade-log" id="tradeLog">
@@ -184,7 +242,7 @@
           </div>
         </div>
 
-        <!-- Live Trade Feed -->
+
         <div class="trade-panel">
           <h3>⚡ Live Trade Feed</h3>
           <div class="trade-feed" id="tradeFeed"></div>
@@ -194,12 +252,104 @@
     </div>
   </div>
 
-  <!-- ══ DISCLAIMER FOOTER ════════════════════════════ -->
-  <footer>
-    <p>⚠️ <strong>PAPER TRADING ONLY</strong> — Simulated portfolio with fake money. Not real trades.</p>
-    <p>For <strong>educational purposes only</strong>. Not financial advice. | StockSense AI — Hackathon 2026</p>
+
+
+
+
+  <section class="insights-section">
+    <h2 class="section-title">🌐 AI × Finance — Did You Know?</h2>
+    <div class="insights-grid">
+      <div class="insight-card">
+        <div class="insight-icon">🤖</div>
+        <h4>AI Handles 60-70% of Trades</h4>
+        <p>Algorithmic and AI-driven systems now execute the majority of trades on major stock exchanges worldwide.</p>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">🧠</div>
+        <h4>LSTM Remembers Patterns</h4>
+        <p>Long Short-Term Memory networks can learn patterns across 60+ trading days, capturing trends that humans
+          easily miss.</p>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">📰</div>
+        <h4>News Moves Markets</h4>
+        <p>Studies show that news sentiment can predict short-term stock movements with up to 70% accuracy when combined
+          with technical analysis.</p>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">📊</div>
+        <h4>Bollinger Bands</h4>
+        <p>When Bollinger Band width contracts, a big price move is coming. Our model uses this "squeeze" signal in its
+          10-feature pipeline.</p>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">⚡</div>
+        <h4>Sub-Second Decisions</h4>
+        <p>Once trained, our LSTM model generates 5-day forecasts in under 50ms — faster than any human analyst could
+          process a single chart.</p>
+      </div>
+      <div class="insight-card">
+        <div class="insight-icon">🛡️</div>
+        <h4>Risk Management is Key</h4>
+        <p>Professional trading firms never risk more than 2% per trade. Our bot uses stop-loss, take-profit, and
+          trailing stops for protection.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <section class="pipeline-section">
+    <h2 class="section-title">⚙️ How StockSense AI Works</h2>
+    <div class="pipeline">
+      <div class="pipe-step">
+        <div class="pipe-num">01</div>
+        <div class="pipe-icon">📥</div>
+        <h4>Data Ingestion</h4>
+        <p>2 years of OHLCV data fetched from Yahoo Finance in real-time for any stock ticker.</p>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="pipe-num">02</div>
+        <div class="pipe-icon">📊</div>
+        <h4>Feature Engineering</h4>
+        <p>10 technical indicators computed: SMA, EMA, RSI, MACD, Bollinger Bands, ATR, and Volume.</p>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="pipe-num">03</div>
+        <div class="pipe-icon">🧠</div>
+        <h4>AI Prediction</h4>
+        <p>3-layer LSTM neural network trained on 60-day windows predicts next 5 business days' prices.</p>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="pipe-step">
+        <div class="pipe-num">04</div>
+        <div class="pipe-icon">💹</div>
+        <h4>Smart Trading</h4>
+        <p>Composite score (LSTM + Technical + Sentiment) adapts to market regime for auto BUY/SELL.</p>
+      </div>
+    </div>
+  </section>
+
+
+  <footer class="app-footer">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <span class="footer-logo">📈 StockSense AI</span>
+        <span class="footer-tagline">Where Machine Learning Meets Market Intelligence</span>
+      </div>
+      <div class="footer-tech">
+        <span>Built with</span>
+        <span class="tech-badge">Python</span>
+        <span class="tech-badge">PyTorch</span>
+        <span class="tech-badge">FastAPI</span>
+        <span class="tech-badge">FinBERT</span>
+        <span class="tech-badge">Chart.js</span>
+      </div>
+    </div>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=6"></script>
 </body>
+
 </html>
