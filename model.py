@@ -1,4 +1,3 @@
-
 import numpy as np
 import pandas as pd
 import torch
@@ -7,11 +6,60 @@ from torch.utils.data import DataLoader, TensorDataset
 from sklearn.preprocessing import MinMaxScaler
 from datetime import datetime, timedelta
 
+from enterprise_models import (
+    get_enterprise_predictions,
+    blend_enterprise_predictions,
+)
 
 FEATURE_COLS = ["Close", "SMA_20", "EMA_20", "RSI", "MACD", "Volume",
                 "BB_Upper", "BB_Lower", "BB_Width", "ATR"]
 LOOK_BACK = 60
 PREDICT_DAYS = 5
+
+# Blend: 60% legacy (LSTM), 40% enterprise (H2O + DataRobot + Alteryx)
+LEGACY_WEIGHT = 0.45
+ENTERPRISE_WEIGHT = 0.55
+
+# Drawdown dampening: when recent 2-day drop > 3%, reduce rubber-band bounce
+DRAWDOWN_THRESHOLD_PCT = 2.8
+DAMPER_STRENGTH = 0.46  # pull 46% toward flat when triggered
+
+
+def _apply_drawdown_dampening(
+    predicted_prices: list[float],
+    current_price: float,
+    df: pd.DataFrame,
+) -> list[float]:
+    """
+    When stock just suffered a sharp sell-off (e.g. earnings miss), dampen
+    immediate V-shaped bounce predictions. Pull path toward continuation/flat.
+    """
+    if len(df) < 3 or len(predicted_prices) != PREDICT_DAYS:
+        return predicted_prices
+
+    close = df["Close"].values
+    ret_1d = (float(close[-1]) / float(close[-2]) - 1) * 100 if len(close) >= 2 and close[-2] else 0
+    ret_2d = (float(close[-1]) / float(close[-3]) - 1) * 100 if len(close) >= 3 and close[-3] else 0
+    worst_return = min(ret_1d, ret_2d)
+
+    if worst_return > -DRAWDOWN_THRESHOLD_PCT:
+        return predicted_prices
+
+    # Model predicts bounce (day1 > current)?
+    day1_pred = predicted_prices[0]
+    if day1_pred <= current_price:
+        return predicted_prices
+
+    # Dampen: pull toward flat path (current_price flat for day1, gradual to day5)
+    flat_day1 = current_price
+    flat_day5 = current_price + 0.2 * (predicted_prices[-1] - current_price)  # very mild recovery
+    damped = []
+    for i in range(PREDICT_DAYS):
+        t = (i + 1) / PREDICT_DAYS
+        flat_val = flat_day1 + t * (flat_day5 - flat_day1)
+        blended = (1 - DAMPER_STRENGTH) * predicted_prices[i] + DAMPER_STRENGTH * flat_val
+        damped.append(round(blended, 2))
+    return damped
 
 
 class StockLSTM(nn.Module):
@@ -161,7 +209,25 @@ def train_and_predict(
 
     dummy = np.zeros((len(raw_pred), n_features), dtype=np.float32)
     dummy[:, 0] = raw_pred
-    predicted_prices = scaler.inverse_transform(dummy)[:, 0].tolist()
+    lstm_prices = scaler.inverse_transform(dummy)[:, 0].tolist()
+    current_price = float(close[-1])
+
+    # Enterprise ensemble: H2O + DataRobot + Alteryx (40% weight)
+    h2o_p, dr_p, alt_p = get_enterprise_predictions(df, current_price)
+    enterprise_blend = blend_enterprise_predictions(h2o_p, dr_p, alt_p)
+
+    if enterprise_blend is not None:
+        predicted_prices = [
+            round(LEGACY_WEIGHT * lstm_prices[i] + ENTERPRISE_WEIGHT * enterprise_blend[i], 2)
+            for i in range(PREDICT_DAYS)
+        ]
+        models_used = ["LSTM", "H2O", "DataRobot", "Alteryx"]
+    else:
+        predicted_prices = [round(p, 2) for p in lstm_prices]
+        models_used = ["LSTM"]
+
+    # Drawdown dampening: reduce rubber-band bounce after sharp sell-offs
+    predicted_prices = _apply_drawdown_dampening(predicted_prices, current_price, df)
 
     historical_prices = close[-30:].tolist()
 
@@ -182,11 +248,13 @@ def train_and_predict(
             bdays += 1
 
     return {
-        "predicted_prices": [round(p, 2) for p in predicted_prices],
+        "predicted_prices": predicted_prices,
         "confidence": confidence,
         "risk": risk,
         "test_mse": round(test_loss, 6),
         "historical_last_30": [round(float(p), 2) for p in historical_prices],
         "historical_dates": hist_dates,
         "prediction_dates": pred_dates,
+        "blend": f"{int(LEGACY_WEIGHT*100)}% legacy + {int(ENTERPRISE_WEIGHT*100)}% enterprise",
+        "models_used": models_used,
     }
