@@ -175,8 +175,9 @@
       <button class="btn-wallet nav-btn" onclick="showWallet()">💰 Wallet</button>
       <button class="btn-trade nav-btn" onclick="openTradePanel()">🛒 Trade</button>
     </div>
-    <div class="live-badge" id="liveBadge">
-      <span class="dot"></span> LIVE
+    <div class="live-badge live" id="liveBadge" title="Indian market hours: 9:15 AM – 3:30 PM IST">
+      <span class="dot"></span>
+      <span id="liveBadgeText">LIVE</span>
     </div>
   </nav>
 
@@ -257,7 +258,7 @@
                 <span></span><span></span><span></span><span></span><span></span>
               </div>
               <div class="loader-brain">🧠</div>
-              <p class="loader-title">AI Model Training</p>
+              <p class="loader-title">Generating Graph</p>
               <p class="loader-sub" id="predLoaderMsg">Analyzing patterns with 10-feature LSTM...</p>
               <div class="loader-bar">
                 <div class="loader-bar-fill"></div>
