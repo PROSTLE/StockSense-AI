@@ -555,6 +555,12 @@ async function loadPrediction(ticker, version) {
     }
     const data = await res.json();
 
+    // Handle API error responses
+    if (data.detail) {
+      clearInterval(predMsgInterval);
+      msgEl.textContent = "⚠️ " + data.detail;
+      return;
+    }
 
     clearInterval(predMsgInterval);
 
@@ -562,22 +568,89 @@ async function loadPrediction(ticker, version) {
     loader.classList.add("hidden");
     chartWrap.style.display = "";
 
-    document.getElementById("predConf").textContent = data.confidence + "%";
+    const confidence = data.confidence != null ? data.confidence : 0;
+    const risk = data.risk || "N/A";
+    const prices = data.predicted_prices || [];
+
+    document.getElementById("predConf").textContent = confidence + "%";
     document.getElementById("predConf").style.color =
-      data.confidence >= 70 ? "#22c55e" : data.confidence >= 45 ? "#eab308" : "#ef4444";
+      confidence >= 70 ? "#22c55e" : confidence >= 45 ? "#eab308" : "#ef4444";
 
-    document.getElementById("predRisk").textContent = data.risk;
+    document.getElementById("predRisk").textContent = risk;
     document.getElementById("predRisk").style.color =
-      data.risk === "Low" ? "#22c55e" : data.risk === "Medium" ? "#eab308" : "#ef4444";
+      risk === "Low" ? "#22c55e" : risk === "Medium" ? "#eab308" : "#ef4444";
 
-    document.getElementById("predDay1").textContent = "₹" + data.predicted_prices[0];
-    document.getElementById("predDay5").textContent = "₹" + data.predicted_prices[4];
+    document.getElementById("predDay1").textContent = prices.length > 0 ? "₹" + prices[0] : "—";
+    document.getElementById("predDay5").textContent = prices.length >= 5 ? "₹" + prices[4] : "—";
 
-    drawPredictionChart(data);
+    if (prices.length > 0 && (data.historical_last_30 || []).length > 0) {
+      drawPredictionChart(data);
+    }
+    renderFactorBreakdown(data);
   } catch (e) {
     console.error("Prediction error:", e);
     clearInterval(predMsgInterval);
     msgEl.textContent = "⚠️ Forecast failed — try again";
+  }
+}
+
+function renderFactorBreakdown(data) {
+  const fb = data.factor_breakdown;
+  const container = document.getElementById("factorBreakdown");
+  const list = document.getElementById("factorList");
+  if (!fb || !container || !list) return;
+
+  container.classList.remove("hidden");
+  list.innerHTML = "";
+
+  const factors = [
+    { key: "lstm", label: "LSTM Neural", icon: "🧠" },
+    { key: "enterprise", label: "Enterprise AI", icon: "🏢" },
+    { key: "technical", label: "Technicals", icon: "📈" },
+    { key: "sentiment", label: "News Sentiment", icon: "📰" },
+    { key: "llm", label: "Gemini LLM", icon: "🤖" },
+  ];
+
+  for (const f of factors) {
+    const info = fb[f.key];
+    if (!info) continue;
+
+    const dir = info.direction || info.contribution || "neutral";
+    const weight = info.weight || 0;
+    const dirClass = dir === "bullish" || dir === "positive" ? "bullish"
+      : dir === "bearish" || dir === "negative" ? "bearish"
+        : dir === "shape" ? "shape"
+          : dir === "magnitude" ? "magnitude"
+            : "neutral";
+    const dirLabel = dir === "positive" ? "bullish" : dir === "negative" ? "bearish" : dir;
+
+    const row = document.createElement("div");
+    row.className = "factor-row";
+    row.innerHTML = `
+      <span class="factor-name">${f.icon} ${f.label}</span>
+      <div class="factor-bar-wrap">
+        <div class="factor-bar-fill ${dirClass}" style="width: 0%"></div>
+      </div>
+      <span class="factor-weight">${weight}%</span>
+      <span class="factor-direction ${dirClass}">${dirLabel}</span>
+    `;
+    list.appendChild(row);
+
+    // Animate bar width after render
+    requestAnimationFrame(() => {
+      const bar = row.querySelector(".factor-bar-fill");
+      if (bar) bar.style.width = weight + "%";
+    });
+  }
+
+  // LLM reasoning
+  const insight = document.getElementById("llmInsight");
+  const textEl = document.getElementById("llmReasoningText");
+  if (data.llm_reasoning && insight && textEl) {
+    insight.classList.remove("hidden");
+    textEl.textContent = `"${data.llm_reasoning}"`;
+  } else if (insight) {
+    insight.classList.add("hidden");
   }
 }
 
@@ -902,7 +975,7 @@ async function executeManualTrade() {
       const regimeIcon = regime === 'BULL' ? '🐂' : regime === 'BEAR' ? '🐻' : '⚖️';
       addToFeed(
         `🟢 <strong>BOUGHT ${tr.shares} x ${ticker}</strong> @ ₹${price} | ` +
-        `${regimeIcon} ${regime} | Score: ${cs}/100 | SL: ₹${tr.stop_loss} | TP: ₹${tr.take_profit}`,
+        `${regimeIcon} ${regime} | Score: ${cs}/100 | SL: ₹${tr.stop_loss} | TP: ₹${tr.tp1}`,
         "buy"
       );
     } else if (action === "SELL") {
