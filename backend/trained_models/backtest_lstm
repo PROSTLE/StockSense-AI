@@ -1,0 +1,368 @@
+"""
+StockSense AI — Backtest Engine
+================================
+Validates the 5-factor prediction system against real historical data.
+
+Usage:
+    python backtest_lstm.py                          # Interactive mode
+    python backtest_lstm.py RELIANCE.NS              # Single stock
+    python backtest_lstm.py RELIANCE.NS TCS.NS INFY.NS  # Multiple stocks
+
+What it does:
+1. Fetches 2 years of real market data
+2. Picks evaluation windows every 5 trading days (non-overlapping)
+3. Runs the FULL prediction engine (LSTM + Enterprise + Technical) on each window
+4. Compares 5-day predicted prices vs actual prices
+5. Reports: price accuracy %, direction accuracy %, per-day breakdown
+"""
+
+import os
+import sys
+import time
+import numpy as np
+import pandas as pd
+from datetime import datetime
+
+# Add backend to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from stock_data import fetch_stock_data, add_technical_indicators
+from model import train_and_predict, _prediction_cache
+
+
+# ── Configuration ─────────────────────────────────────────────────────────────
+LOOKBACK       = 60    # Days of history needed before prediction window
+PREDICT_DAYS   = 5     # Must match model.py PREDICT_DAYS
+STEP_SIZE      = 5     # Evaluate every N trading days (non-overlapping)
+MIN_DATA_ROWS  = 200   # Minimum rows after indicators (NaN drop)
+MAX_WINDOWS    = 30    # Cap evaluation windows to keep runtime reasonable
+
+
+def backtest_stock(ticker: str, verbose: bool = True) -> dict:
+    """
+    Run full backtest on a single stock.
+    Returns a dict with all accuracy metrics.
+    """
+    if verbose:
+        print(f"\n{'='*70}")
+        print(f"  BACKTESTING: {ticker}")
+        print(f"{'='*70}")
+
+    # ── 1. Fetch full historical data ─────────────────────────────────────
+    if verbose:
+        print(f"  Fetching 2 years of data...")
+    
+    try:
+        df_full = fetch_stock_data(ticker, period="2y", interval="1d")
+        df_full = add_technical_indicators(df_full)
+    except Exception as e:
+        print(f"  ERROR: Could not fetch data for {ticker}: {e}")
+        return {"ticker": ticker, "error": str(e)}
+
+    df_full = df_full.dropna().reset_index(drop=True)
+
+    if len(df_full) < MIN_DATA_ROWS:
+        print(f"  ERROR: Only {len(df_full)} rows after cleanup (need {MIN_DATA_ROWS}+)")
+        return {"ticker": ticker, "error": "Insufficient data"}
+
+    if verbose:
+        print(f"  Data: {len(df_full)} trading days")
+        first_date = str(df_full.iloc[0]["Date"])[:10] if "Date" in df_full.columns else "N/A"
+        last_date = str(df_full.iloc[-1]["Date"])[:10] if "Date" in df_full.columns else "N/A"
+        print(f"  Range: {first_date} → {last_date}")
+
+    # ── 2. Build evaluation windows ──────────────────────────────────────
+    # Each window: use df[0 : cutoff] for training, compare prediction vs df[cutoff : cutoff+5]
+    windows = []
+    # Start from LOOKBACK+50 (need enough data for LSTM + enterprise training)
+    start_from = max(LOOKBACK + 50, len(df_full) - MAX_WINDOWS * STEP_SIZE - PREDICT_DAYS)
+    start_from = max(LOOKBACK + 50, start_from)
+
+    for cutoff in range(start_from, len(df_full) - PREDICT_DAYS, STEP_SIZE):
+        hist_df = df_full.iloc[:cutoff].copy()
+        future_df = df_full.iloc[cutoff:cutoff + PREDICT_DAYS]
+
+        if len(hist_df) < LOOKBACK + 50 or len(future_df) < PREDICT_DAYS:
+            continue
+
+        actual_prices = future_df["Close"].values.tolist()
+        current_price = float(hist_df["Close"].iloc[-1])
+
+        if "Date" in hist_df.columns:
+            pred_date = str(hist_df["Date"].iloc[-1])[:10]
+        else:
+            pred_date = f"window_{cutoff}"
+
+        windows.append({
+            "cutoff": cutoff,
+            "hist_df": hist_df,
+            "actual_prices": actual_prices,
+            "current_price": current_price,
+            "date": pred_date,
+        })
+
+    if not windows:
+        print(f"  ERROR: No valid evaluation windows found")
+        return {"ticker": ticker, "error": "No valid windows"}
+
+    # Cap at MAX_WINDOWS (take the most recent ones)
+    if len(windows) > MAX_WINDOWS:
+        windows = windows[-MAX_WINDOWS:]
+
+    if verbose:
+        print(f"  Evaluation windows: {len(windows)} (every {STEP_SIZE} days)")
+        print(f"  Windows span: {windows[0]['date']} → {windows[-1]['date']}")
+        print()
+
+    # ── 3. Run predictions on each window ────────────────────────────────
+    results = []
+    total_windows = len(windows)
+
+    for idx, w in enumerate(windows):
+        # Clear prediction cache so each window trains fresh
+        _prediction_cache.clear()
+
+        if verbose:
+            pct_done = int((idx / total_windows) * 100)
+            print(f"  [{pct_done:3d}%] Window {idx+1}/{total_windows}: {w['date']}  ", end="", flush=True)
+
+        t0 = time.time()
+        try:
+            prediction = train_and_predict(w["hist_df"])
+            elapsed = time.time() - t0
+            pred_prices = prediction["predicted_prices"]
+            actual = w["actual_prices"]
+            current = w["current_price"]
+
+            # ── Per-day metrics ──
+            day_errors = []
+            day_pct_errors = []
+            direction_hits = []
+
+            for day in range(PREDICT_DAYS):
+                p = pred_prices[day]
+                a = actual[day]
+
+                # Absolute error
+                err = abs(p - a)
+                day_errors.append(err)
+
+                # Percentage error
+                pct_err = abs(p - a) / a * 100 if a != 0 else 0
+                day_pct_errors.append(pct_err)
+
+                # Direction accuracy (did we predict up/down correctly?)
+                pred_dir = "up" if p > current else "down"
+                actual_dir = "up" if a > current else "down"
+                direction_hits.append(1 if pred_dir == actual_dir else 0)
+
+            result = {
+                "date": w["date"],
+                "current_price": round(current, 2),
+                "predicted": [round(p, 2) for p in pred_prices],
+                "actual": [round(a, 2) for a in actual],
+                "mae": round(np.mean(day_errors), 2),
+                "mape": round(np.mean(day_pct_errors), 2),
+                "price_accuracy": round(100 - np.mean(day_pct_errors), 2),
+                "direction_accuracy": round(np.mean(direction_hits) * 100, 1),
+                "day5_pred": round(pred_prices[-1], 2),
+                "day5_actual": round(actual[-1], 2),
+                "day5_pct_error": round(abs(pred_prices[-1] - actual[-1]) / actual[-1] * 100, 2),
+                "confidence": prediction.get("confidence", 0),
+                "risk": prediction.get("risk", "?"),
+                "mode": prediction.get("factor_breakdown", {}).get("mode", "Normal"),
+                "time_sec": round(elapsed, 1),
+            }
+            results.append(result)
+
+            if verbose:
+                acc = result["price_accuracy"]
+                dir_acc = result["direction_accuracy"]
+                emoji = "✅" if acc >= 95 else "⚠️" if acc >= 90 else "❌"
+                print(f"Price: {acc:.1f}% | Direction: {dir_acc:.0f}% | {result['mode']} {emoji}  ({elapsed:.1f}s)")
+
+        except Exception as e:
+            elapsed = time.time() - t0
+            if verbose:
+                print(f"FAILED: {str(e)[:60]}  ({elapsed:.1f}s)")
+            continue
+
+    if not results:
+        print(f"  ERROR: All prediction windows failed")
+        return {"ticker": ticker, "error": "All windows failed"}
+
+    # ── 4. Aggregate metrics ─────────────────────────────────────────────
+    df_results = pd.DataFrame(results)
+
+    avg_price_accuracy = round(df_results["price_accuracy"].mean(), 2)
+    avg_direction_accuracy = round(df_results["direction_accuracy"].mean(), 1)
+    avg_mape = round(df_results["mape"].mean(), 2)
+    avg_mae = round(df_results["mae"].mean(), 2)
+    avg_confidence = round(df_results["confidence"].mean(), 1)
+    best_accuracy = round(df_results["price_accuracy"].max(), 2)
+    worst_accuracy = round(df_results["price_accuracy"].min(), 2)
+    crisis_windows = int((df_results["mode"] == "Crisis").sum())
+
+    # Per-day breakdown
+    day_accuracies = []
+    for day in range(PREDICT_DAYS):
+        day_errs = []
+        for r in results:
+            p = r["predicted"][day]
+            a = r["actual"][day]
+            pct = abs(p - a) / a * 100 if a else 0
+            day_errs.append(pct)
+        day_acc = round(100 - np.mean(day_errs), 2)
+        day_accuracies.append(day_acc)
+
+    summary = {
+        "ticker": ticker,
+        "windows_tested": len(results),
+        "date_range": f"{results[0]['date']} → {results[-1]['date']}",
+        "avg_price_accuracy_pct": avg_price_accuracy,
+        "avg_direction_accuracy_pct": avg_direction_accuracy,
+        "avg_mape_pct": avg_mape,
+        "avg_mae_rupees": avg_mae,
+        "avg_confidence": avg_confidence,
+        "best_window_accuracy": best_accuracy,
+        "worst_window_accuracy": worst_accuracy,
+        "crisis_mode_windows": crisis_windows,
+        "per_day_accuracy": day_accuracies,
+        "results": results,
+    }
+
+    # ── 5. Print report ──────────────────────────────────────────────────
+    if verbose:
+        print(f"\n{'─'*70}")
+        print(f"  📊 BACKTEST RESULTS: {ticker}")
+        print(f"{'─'*70}")
+        print(f"  Windows tested     : {len(results)}")
+        print(f"  Date range         : {results[0]['date']} → {results[-1]['date']}")
+        print()
+        print(f"  ┌─────────────────────────────────────────┐")
+        print(f"  │  PRICE ACCURACY     :  {avg_price_accuracy:6.2f}%          │")
+        print(f"  │  DIRECTION ACCURACY :  {avg_direction_accuracy:6.1f}%          │")
+        print(f"  │  AVG ERROR (MAPE)   :  {avg_mape:6.2f}%          │")
+        print(f"  │  AVG ERROR (MAE)    :  ₹{avg_mae:<8.2f}        │")
+        print(f"  │  AVG CONFIDENCE     :  {avg_confidence:6.1f}%          │")
+        print(f"  └─────────────────────────────────────────┘")
+        print()
+        print(f"  Per-Day Accuracy:")
+        for d, acc in enumerate(day_accuracies):
+            bar = "█" * int(acc / 2) + "░" * (50 - int(acc / 2))
+            print(f"    Day {d+1}: {bar} {acc:.1f}%")
+        print()
+        print(f"  Best window  : {best_accuracy}%")
+        print(f"  Worst window : {worst_accuracy}%")
+        print(f"  Crisis mode  : {crisis_windows}/{len(results)} windows")
+
+    # ── 6. Save CSV ──────────────────────────────────────────────────────
+    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"{ticker.replace('.', '_')}_backtest.csv")
+    df_results.to_csv(csv_path, index=False)
+    if verbose:
+        print(f"\n  📁 Detailed results saved to: {csv_path}")
+
+    return summary
+
+
+def backtest_multiple(tickers: list[str]) -> dict:
+    """Run backtest on multiple stocks and produce a combined report."""
+    all_summaries = []
+
+    for ticker in tickers:
+        summary = backtest_stock(ticker, verbose=True)
+        if "error" not in summary:
+            all_summaries.append(summary)
+
+    if not all_summaries:
+        print("\n❌ No successful backtests.")
+        return {}
+
+    # ── Combined report ──
+    print(f"\n\n{'='*70}")
+    print(f"  📊 COMBINED BACKTEST REPORT — {len(all_summaries)} STOCKS")
+    print(f"{'='*70}")
+    print()
+    print(f"  {'Stock':<18} {'Price Acc':>10} {'Dir Acc':>10} {'MAPE':>8} {'Confidence':>12} {'Windows':>8}")
+    print(f"  {'─'*18} {'─'*10} {'─'*10} {'─'*8} {'─'*12} {'─'*8}")
+
+    total_acc = []
+    total_dir = []
+
+    for s in all_summaries:
+        acc = s["avg_price_accuracy_pct"]
+        dir_acc = s["avg_direction_accuracy_pct"]
+        total_acc.append(acc)
+        total_dir.append(dir_acc)
+        emoji = "✅" if acc >= 95 else "⚠️" if acc >= 90 else "❌"
+        print(f"  {s['ticker']:<18} {acc:>9.2f}% {dir_acc:>9.1f}% {s['avg_mape_pct']:>7.2f}% {s['avg_confidence']:>11.1f}% {s['windows_tested']:>7} {emoji}")
+
+    print(f"  {'─'*18} {'─'*10} {'─'*10} {'─'*8} {'─'*12} {'─'*8}")
+    avg_price = np.mean(total_acc)
+    avg_dir = np.mean(total_dir)
+    print(f"  {'OVERALL':<18} {avg_price:>9.2f}% {avg_dir:>9.1f}%")
+    print()
+
+    grade = "A+" if avg_price >= 97 else "A" if avg_price >= 95 else "B+" if avg_price >= 93 else "B" if avg_price >= 90 else "C" if avg_price >= 85 else "D"
+    print(f"  🏆 Overall Grade: {grade}")
+    print(f"     Average Price Accuracy: {avg_price:.2f}%")
+    print(f"     Average Direction Accuracy: {avg_dir:.1f}%")
+    print()
+
+    return {
+        "stocks_tested": len(all_summaries),
+        "overall_price_accuracy": round(avg_price, 2),
+        "overall_direction_accuracy": round(avg_dir, 1),
+        "grade": grade,
+        "summaries": all_summaries,
+    }
+
+
+# ── Default tickers for multi-stock backtest ──────────────────────────────────
+DEFAULT_TICKERS = [
+    "RELIANCE.NS",
+    "TCS.NS",
+    "INFY.NS",
+    "HDFCBANK.NS",
+    "TATAMOTORS.NS",
+]
+
+
+if __name__ == "__main__":
+    print()
+    print("╔══════════════════════════════════════════════════════════╗")
+    print("║        StockSense AI — Prediction Backtest Engine       ║")
+    print("║     5-Factor Model: LSTM + Enterprise + Tech + News     ║")
+    print("║                   + Gemini LLM Analysis                 ║")
+    print("╚══════════════════════════════════════════════════════════╝")
+    print()
+
+    if len(sys.argv) > 1:
+        tickers = sys.argv[1:]
+    else:
+        print("Options:")
+        print("  1. Single stock backtest")
+        print("  2. Multi-stock backtest (5 Nifty stocks)")
+        print("  3. Custom stocks")
+        print()
+        choice = input("Choose (1/2/3): ").strip()
+
+        if choice == "1":
+            ticker = input("Enter stock ticker (e.g. RELIANCE.NS): ").strip()
+            if not ticker:
+                ticker = "RELIANCE.NS"
+            tickers = [ticker]
+        elif choice == "2":
+            tickers = DEFAULT_TICKERS
+        elif choice == "3":
+            raw = input("Enter tickers separated by commas: ").strip()
+            tickers = [t.strip() for t in raw.split(",") if t.strip()]
+        else:
+            tickers = DEFAULT_TICKERS
+
+    if len(tickers) == 1:
+        backtest_stock(tickers[0], verbose=True)
+    else:
+        backtest_multiple(tickers)
+
+    print("\n✅ Backtest complete.")
