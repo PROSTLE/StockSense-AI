@@ -190,3 +190,4 @@ def train_and_predict(
         "historical_dates": hist_dates,
         "prediction_dates": pred_dates,
     }
+
