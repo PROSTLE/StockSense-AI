@@ -297,14 +297,8 @@ def execute_buy(
         state["positions"][ticker] = position
         _save_state(state)
 
-        # Record portfolio value snapshot
-        try:
-            pos_value = sum(p["shares"] * p["buy_price"] for p in state["positions"].values())
-            record_portfolio_snapshot(state["balance"] + pos_value)
-        except Exception:
-            pass
-
-        return {
+        snapshot_value = state["balance"]
+        result = {
             "status": "bought",
             "ticker": ticker,
             "shares": shares,
@@ -316,6 +310,15 @@ def execute_buy(
             "regime": regime,
             "balance": state["balance"],
         }
+
+    # Record portfolio value snapshot OUTSIDE the lock to avoid deadlock
+    try:
+        pos_value = sum(p["shares"] * p["buy_price"] for p in state["positions"].values())
+        record_portfolio_snapshot(snapshot_value + pos_value)
+    except Exception:
+        pass
+
+    return result
 
 
 def execute_sell(ticker: str, current_price: float, reason: str) -> dict:
@@ -351,14 +354,9 @@ def execute_sell(ticker: str, current_price: float, reason: str) -> dict:
         del state["positions"][ticker]
         _save_state(state)
 
-        # Record portfolio value snapshot
-        try:
-            pos_value = sum(p["shares"] * p["buy_price"] for p in state["positions"].values())
-            record_portfolio_snapshot(state["balance"] + pos_value)
-        except Exception:
-            pass
-
-        return {
+        snapshot_value = state["balance"]
+        remaining_positions = dict(state["positions"])
+        result = {
             "status": "sold",
             "ticker": ticker,
             "shares": trade["shares"],
@@ -368,6 +366,15 @@ def execute_sell(ticker: str, current_price: float, reason: str) -> dict:
             "reason": reason,
             "balance": state["balance"],
         }
+
+    # Record portfolio value snapshot OUTSIDE the lock to avoid deadlock
+    try:
+        pos_value = sum(p["shares"] * p["buy_price"] for p in remaining_positions.values())
+        record_portfolio_snapshot(snapshot_value + pos_value)
+    except Exception:
+        pass
+
+    return result
 
 
 def check_position(ticker: str, current_price: float) -> dict:
@@ -410,9 +417,14 @@ def check_position(ticker: str, current_price: float) -> dict:
         trail_pct = round(((pos["trailing_stop"] - buy_price) / buy_price) * 100, 2)
         return {"action": "sell", "reason": f"Trailing stop triggered ({trail_pct}%)"}
 
-    # Max hold bars (intraday)
-    pos["bar_count"] = pos.get("bar_count", pos.get("day_count", 0)) + 1
-    if pos["bar_count"] >= MAX_HOLD_BARS:
+    # Max hold bars (intraday) — persist incremented bar_count
+    new_bar_count = pos.get("bar_count", pos.get("day_count", 0)) + 1
+    with _lock:
+        state = _load_state()
+        if ticker in state["positions"]:
+            state["positions"][ticker]["bar_count"] = new_bar_count
+            _save_state(state)
+    if new_bar_count >= MAX_HOLD_BARS:
         return {"action": "sell", "reason": f"Max hold period ({MAX_HOLD_BARS} bars)"}
 
     return {
