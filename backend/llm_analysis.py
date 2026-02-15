@@ -5,6 +5,12 @@ Falls back gracefully to neutral (0) when no API key is configured.
 """
 
 from __future__ import annotations
+import os
+from dotenv import load_dotenv
+import google.generativeai as genai
+
+# Load variables from the .env file FIRST
+load_dotenv()
 
 import os
 import json
@@ -42,20 +48,26 @@ def _set_cached(ticker: str, result: dict):
 
 
 def _init_gemini():
-    """Initialize Gemini model (lazy, once)."""
     global _gemini_model
     if _gemini_model is not None:
         return True
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-    if not api_key or not GEMINI_AVAILABLE:
-        return False
-    try:
-        genai.configure(api_key=api_key)
-        _gemini_model = genai.GenerativeModel("gemini-2.0-flash")
-        return True
-    except Exception:
+    
+    # Correctly look for the variable NAME defined in your .env
+    api_key = os.getenv("GEMINI_API_KEY") 
+    
+    if not api_key:
+        print("❌ CRITICAL: GEMINI_API_KEY not found in environment!")
         return False
 
+    try:
+        genai.configure(api_key=api_key)
+        _gemini_model = genai.GenerativeModel("gemini-2.5-flash-lite")
+        return True
+    except Exception as e:
+        print(f"❌ Gemini Config Error: {e}")
+        return False
+    
+  
 
 def _build_prompt(
     ticker: str,
